@@ -40,7 +40,8 @@ try {
   const zoomWidthBefore = await page.locator("[data-graph-preview] svg").evaluate((svg) => svg.getBoundingClientRect().width);
   await page.locator('[data-graph-action="zoom-in"]').click();
   assert.equal(await page.locator('[data-graph-action="zoom-reset"]').textContent(), "110%");
-  assert.equal(await page.locator("[data-graph-preview] svg").evaluate((svg) => svg.getBoundingClientRect().width > zoomWidthBefore), true);
+  const zoomWidthAfter = await page.locator("[data-graph-preview] svg").evaluate((svg) => svg.getBoundingClientRect().width);
+  assert.equal(zoomWidthAfter > zoomWidthBefore, true);
   await page.locator('[data-graph-action="zoom-reset"]').click();
   assert.equal(await page.locator('[data-graph-action="zoom-reset"]').textContent(), "100%");
 
