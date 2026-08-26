@@ -1,5 +1,23 @@
 let serial = 0;
 
+export const MIN_GRAPH_ZOOM = 0.25;
+export const MAX_GRAPH_ZOOM = 4;
+
+export function clampGraphZoom(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 1;
+  return Math.min(MAX_GRAPH_ZOOM, Math.max(MIN_GRAPH_ZOOM, numeric));
+}
+
+export function zoomedScrollOffset(scrollOffset, pointerOffset, oldZoom, newZoom, fixedInset = 0) {
+  const before = clampGraphZoom(oldZoom);
+  const after = clampGraphZoom(newZoom);
+  const scroll = Number(scrollOffset) || 0;
+  const pointer = Number(pointerOffset) || 0;
+  const inset = Number(fixedInset) || 0;
+  return Math.max(0, inset + (scroll + pointer - inset) * (after / before) - pointer);
+}
+
 function makeId(prefix) {
   serial += 1;
   return `${prefix}-${Date.now().toString(36)}-${serial.toString(36)}`;

@@ -37,6 +37,33 @@ try {
   assert.equal(await page.locator("[data-graph-status]").textContent(), "4 STATES · 6 ARROWS");
   assert.equal(await page.locator("[data-graph-preview] .node").count(), 4);
 
+  const zoomWidthBefore = await page.locator("[data-graph-preview] svg").evaluate((svg) => svg.getBoundingClientRect().width);
+  await page.locator('[data-graph-action="zoom-in"]').click();
+  assert.equal(await page.locator('[data-graph-action="zoom-reset"]').textContent(), "110%");
+  assert.equal(await page.locator("[data-graph-preview] svg").evaluate((svg) => svg.getBoundingClientRect().width > zoomWidthBefore), true);
+  await page.locator('[data-graph-action="zoom-reset"]').click();
+  assert.equal(await page.locator('[data-graph-action="zoom-reset"]').textContent(), "100%");
+
+  const wheelZoom = await page.locator("[data-graph-preview]").evaluate((preview) => {
+    const rect = preview.getBoundingClientRect();
+    const svg = preview.querySelector("svg");
+    const widthBefore = svg.getBoundingClientRect().width;
+    preview.dispatchEvent(new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: true,
+      deltaY: -100,
+      clientX: rect.left + 80,
+      clientY: rect.top + 80,
+    }));
+    return {
+      widthBefore,
+      widthAfter: svg.getBoundingClientRect().width,
+      readout: preview.closest(".graph-app").querySelector('[data-graph-action="zoom-reset"]').textContent,
+    };
+  });
+  assert.equal(wheelZoom.widthAfter > wheelZoom.widthBefore, true);
+
   const intrinsicBefore = await page.locator("[data-graph-preview] svg").evaluate((svg) => ({
     width: svg.getAttribute("width"),
     height: svg.getAttribute("height"),
@@ -79,6 +106,7 @@ try {
   assert.match(await page.locator('[data-window="editor"] .window-title').textContent(), /DEPENDENCY TEST\.boxline/);
   assert.equal(await page.evaluate(() => window.boxlineEditor.getSource()), source);
   assert.equal(await page.locator("[data-graph-status]").textContent(), "2 STATES · 1 ARROW");
+  assert.equal(await page.locator('[data-graph-action="zoom-reset"]').textContent(), wheelZoom.readout);
 
   const downloadPromise = page.waitForEvent("download");
   await page.locator('[data-graph-action="export-pdf"]').click();
@@ -100,6 +128,9 @@ try {
   await mobile.reload({ waitUntil: "networkidle" });
   assert.equal(await mobile.locator('[data-window="editor"]').isVisible(), true);
   assert.equal(await mobile.locator('[data-window="editor"]').evaluate((node) => node.getBoundingClientRect().right <= document.querySelector("#desktop").getBoundingClientRect().right + 1), true);
+  await mobile.locator('[data-editor-action="open-graph"]').click();
+  assert.equal(await mobile.locator('[data-window="graph"]').isVisible(), true);
+  assert.equal(await mobile.locator('[data-window="graph"] .graph-toolbar').evaluate((toolbar) => toolbar.scrollWidth <= toolbar.clientWidth), true);
   await mobile.screenshot({ path: join(artifacts.pathname, "mobile.png") });
   await mobileContext.close();
 

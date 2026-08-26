@@ -74,12 +74,17 @@
         <div class="app-toolbar graph-toolbar">
           <span class="graph-status" data-graph-status data-state="empty">WAITING FOR A STATE</span>
           <span class="tool-spacer"></span>
+          <div class="zoom-controls" aria-label="Graph zoom controls">
+            <button class="tool-button zoom-step" data-graph-action="zoom-out" type="button" aria-label="Zoom out">−</button>
+            <button class="tool-button zoom-readout" data-graph-action="zoom-reset" type="button" title="Ctrl+scroll to zoom">100%</button>
+            <button class="tool-button zoom-step" data-graph-action="zoom-in" type="button" aria-label="Zoom in">+</button>
+          </div>
           <button class="tool-button" data-graph-action="export-pdf" type="button">PDF</button>
           <button class="tool-button" data-graph-action="export-png" type="button">PNG</button>
         </div>
         <div class="sheet-frame">
           <div class="graph-preview empty" data-graph-preview aria-live="polite"></div>
-          <div class="sheet-meta"><span>AUTOMATIC LAYOUT</span><span data-graph-file></span></div>
+          <div class="sheet-meta"><span>AUTOMATIC LAYOUT · CTRL+SCROLL ZOOM</span><span data-graph-file></span></div>
         </div>
       </div>
     </template>

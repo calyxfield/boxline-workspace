@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  clampGraphZoom,
   createDefaultFiles,
   createDiagram,
   createFolder,
@@ -9,6 +10,7 @@ import {
   moveNode,
   normalizeFiles,
   uniqueName,
+  zoomedScrollOffset,
 } from "../workspace-model.mjs";
 
 test("default workspace contains editable Boxline examples", () => {
@@ -43,4 +45,17 @@ test("moving prevents cycles and keeps file contents intact", () => {
 test("normalization rejects a malformed saved root", () => {
   const fallback = createDefaultFiles("state Safe:");
   assert.equal(normalizeFiles({ type: "file" }, fallback), fallback);
+});
+
+test("graph zoom is bounded and keeps the cursor on the same graph point", () => {
+  assert.equal(clampGraphZoom(0.1), 0.25);
+  assert.equal(clampGraphZoom(9), 4);
+  assert.equal(clampGraphZoom("bad"), 1);
+  const oldScroll = 140;
+  const pointer = 90;
+  const inset = 20;
+  const next = zoomedScrollOffset(oldScroll, pointer, 1, 1.5, inset);
+  const graphPointBefore = (oldScroll + pointer - inset) / 1;
+  const graphPointAfter = (next + pointer - inset) / 1.5;
+  assert.equal(graphPointAfter, graphPointBefore);
 });

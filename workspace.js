@@ -7,6 +7,7 @@ import {
 } from "./graph.mjs";
 import { createSourceEditor } from "./vendor/codemirror.js";
 import {
+  clampGraphZoom,
   createDefaultFiles,
   createDiagram,
   createFolder,
@@ -16,6 +17,7 @@ import {
   moveNode,
   normalizeFiles,
   uniqueName,
+  zoomedScrollOffset,
 } from "./workspace-model.mjs";
 
 const STORAGE_KEY = "boxline.workspace.v1";
@@ -172,6 +174,7 @@ function createWindowState(id) {
     w: app.w,
     h: app.h,
     z: 1,
+    ...(id === "graph" ? { zoom: 1 } : {}),
   };
 }
 
@@ -599,6 +602,22 @@ function openGraph() {
 }
 
 function setupGraph(element) {
+  const preview = element.querySelector("[data-graph-preview]");
+  element.querySelector('[data-graph-action="zoom-out"]').addEventListener("click", () => {
+    setGraphZoom(graphZoom() - 0.1);
+  });
+  element.querySelector('[data-graph-action="zoom-reset"]').addEventListener("click", () => {
+    setGraphZoom(1);
+  });
+  element.querySelector('[data-graph-action="zoom-in"]').addEventListener("click", () => {
+    setGraphZoom(graphZoom() + 0.1);
+  });
+  preview.addEventListener("wheel", (event) => {
+    if (!event.ctrlKey && !event.metaKey) return;
+    event.preventDefault();
+    const factor = Math.exp(-event.deltaY * 0.0015);
+    setGraphZoom(graphZoom() * factor, { clientX: event.clientX, clientY: event.clientY });
+  }, { passive: false });
   element.querySelector('[data-graph-action="export-pdf"]').addEventListener("click", downloadPdf);
   element.querySelector('[data-graph-action="export-png"]').addEventListener("click", () => {
     downloadPng().catch((error) => {
@@ -608,6 +627,55 @@ function setupGraph(element) {
     });
   });
   renderGraph();
+}
+
+function graphZoom() {
+  return clampGraphZoom(windows.graph?.zoom ?? 1);
+}
+
+function updateGraphZoomControls(element = appWindow("graph")) {
+  if (!element) return;
+  const zoom = graphZoom();
+  const ready = Boolean(compiled?.graph.nodes.length);
+  const readout = element.querySelector('[data-graph-action="zoom-reset"]');
+  readout.textContent = `${Math.round(zoom * 100)}%`;
+  readout.setAttribute("aria-label", `Reset zoom to 100 percent; current zoom ${Math.round(zoom * 100)} percent`);
+  element.querySelector('[data-graph-action="zoom-out"]').disabled = !ready || zoom <= 0.25;
+  element.querySelector('[data-graph-action="zoom-in"]').disabled = !ready || zoom >= 4;
+  readout.disabled = !ready;
+}
+
+function applyGraphScale(element = appWindow("graph")) {
+  const svg = element?.querySelector("[data-graph-preview] svg");
+  if (!svg || !compiled) {
+    updateGraphZoomControls(element);
+    return;
+  }
+  const zoom = graphZoom();
+  svg.style.width = `${compiled.layout.width * zoom}px`;
+  svg.style.height = `${compiled.layout.height * zoom}px`;
+  updateGraphZoomControls(element);
+}
+
+function setGraphZoom(value, anchor = {}) {
+  const element = appWindow("graph");
+  const preview = element?.querySelector("[data-graph-preview]");
+  if (!preview || !compiled?.graph.nodes.length) return;
+  const oldZoom = graphZoom();
+  const newZoom = clampGraphZoom(value);
+  const rect = preview.getBoundingClientRect();
+  const pointerX = Number.isFinite(anchor.clientX) ? anchor.clientX - rect.left : preview.clientWidth / 2;
+  const pointerY = Number.isFinite(anchor.clientY) ? anchor.clientY - rect.top : preview.clientHeight / 2;
+  const style = getComputedStyle(preview);
+  const insetX = parseFloat(style.paddingLeft) || 0;
+  const insetY = parseFloat(style.paddingTop) || 0;
+  const scrollLeft = zoomedScrollOffset(preview.scrollLeft, pointerX, oldZoom, newZoom, insetX);
+  const scrollTop = zoomedScrollOffset(preview.scrollTop, pointerY, oldZoom, newZoom, insetY);
+  windows.graph.zoom = newZoom;
+  applyGraphScale(element);
+  preview.scrollLeft = scrollLeft;
+  preview.scrollTop = scrollTop;
+  scheduleSave();
 }
 
 function renderGraph() {
@@ -639,6 +707,7 @@ function renderGraph() {
   const disabled = Boolean(graph.errors.length) || !graph.nodes.length;
   pdf.disabled = disabled;
   png.disabled = disabled;
+  applyGraphScale(element);
   updateWindowTitles();
 }
 

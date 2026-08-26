@@ -2,7 +2,7 @@
 
 A local-first windowed shell that reuses the Files and window interactions from the HCW workspace prototype and makes Boxline its sole tool.
 
-The editor opens first. `OPEN GRAPH` creates or focuses a separate live graph window for the same `.boxline` file. Files, source, open windows, and their geometry persist in browser storage.
+The editor opens first. `OPEN GRAPH` creates or focuses a separate live graph window for the same `.boxline` file. Use the visible `−`, percentage, and `+` controls or hold Ctrl/Command while scrolling to zoom around the cursor. Files, source, open windows, graph zoom, and window geometry persist in browser storage.
 
 Run it locally with:
 
