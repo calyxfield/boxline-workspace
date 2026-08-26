@@ -1,8 +1,47 @@
-const NODE_WIDTH = 184;
-const NODE_HEIGHT = 64;
-const LAYER_GAP = 168;
-const ROW_GAP = 76;
-const MARGIN = 64;
+const BASE_NODE_WIDTH = 184;
+const BASE_NODE_HEIGHT = 64;
+const BASE_LAYER_GAP = 168;
+const BASE_ROW_GAP = 76;
+const BASE_MARGIN = 64;
+const BASE_FORWARD_LANE_SPACING = 16;
+
+export const DEFAULT_LAYOUT_OPTIONS = Object.freeze({
+  size: 1,
+  shape: 0,
+  compression: 1,
+});
+
+function clamp(value, minimum, maximum, fallback) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(maximum, Math.max(minimum, numeric));
+}
+
+export function normalizeLayoutOptions(options = {}) {
+  return {
+    size: clamp(options.size, 0.5, 2, DEFAULT_LAYOUT_OPTIONS.size),
+    shape: clamp(options.shape, -1, 1, DEFAULT_LAYOUT_OPTIONS.shape),
+    compression: clamp(options.compression, 0.5, 1.75, DEFAULT_LAYOUT_OPTIONS.compression),
+  };
+}
+
+function layoutGeometry(options) {
+  const normalized = normalizeLayoutOptions(options);
+  const horizontalShape = 16 ** normalized.shape;
+  const verticalShape = 16 ** -normalized.shape;
+  return {
+    options: normalized,
+    scale: normalized.size,
+    horizontalShape,
+    verticalShape,
+    nodeWidth: BASE_NODE_WIDTH * normalized.size,
+    nodeHeight: BASE_NODE_HEIGHT * normalized.size,
+    layerGap: BASE_LAYER_GAP * normalized.size * normalized.compression * horizontalShape,
+    rowGap: BASE_ROW_GAP * normalized.size * normalized.compression * verticalShape,
+    margin: BASE_MARGIN * normalized.size,
+    forwardLaneSpacing: BASE_FORWARD_LANE_SPACING * normalized.size,
+  };
+}
 
 export const EXAMPLE_SOURCE = `# A state box begins with "state Name:"
 # Each indented line becomes a labeled arrow.
@@ -92,9 +131,17 @@ export function parseGraph(source) {
   return { nodes, edges, errors };
 }
 
-export function layoutGraph(graph) {
+export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
+  const geometry = layoutGeometry(options);
   if (!graph.nodes.length) {
-    return { nodes: new Map(), edges: [], width: 720, height: 460 };
+    return {
+      nodes: new Map(),
+      edges: [],
+      width: 720 * geometry.scale * geometry.horizontalShape,
+      height: 460 * geometry.scale * geometry.verticalShape,
+      scale: geometry.scale,
+      options: geometry.options,
+    };
   }
 
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
@@ -118,47 +165,52 @@ export function layoutGraph(graph) {
   });
 
   const maximumRows = Math.max(...columns.map((column) => column?.length ?? 0));
-  const contentHeight = maximumRows * NODE_HEIGHT + Math.max(0, maximumRows - 1) * ROW_GAP;
+  const contentHeight = maximumRows * geometry.nodeHeight + Math.max(0, maximumRows - 1) * geometry.rowGap;
   const backwardCount = graph.edges.filter((edge) => layer.get(edge.target) < layer.get(edge.source)).length;
   const longForwardCount = graph.edges.filter((edge) => layer.get(edge.target) - layer.get(edge.source) > 1).length;
-  const topRouteBand = backwardCount ? 34 + (backwardCount - 1) * 26 : 0;
-  const bottomRouteBand = longForwardCount ? 34 + (longForwardCount - 1) * 26 : 0;
-  const drawingHeight = Math.max(420, contentHeight + (2 * MARGIN));
+  const topRouteBand = backwardCount ? (34 + (backwardCount - 1) * 26) * geometry.scale : 0;
+  const bottomRouteBand = longForwardCount ? (34 + (longForwardCount - 1) * 26) * geometry.scale : 0;
+  const drawingHeight = Math.max(420 * geometry.scale * geometry.verticalShape, contentHeight + (2 * geometry.margin));
   const height = drawingHeight + topRouteBand + bottomRouteBand;
   const positions = new Map();
   const maximumLayer = Math.max(...layer.values());
-  const columnGaps = Array.from({ length: maximumLayer }, () => LAYER_GAP);
+  const columnGaps = Array.from({ length: maximumLayer }, () => geometry.layerGap);
+  const forwardCounts = Array.from({ length: maximumLayer }, () => 0);
   for (const edge of graph.edges) {
     const sourceLayer = layer.get(edge.source);
     const targetLayer = layer.get(edge.target);
     if (targetLayer === sourceLayer + 1) {
-      columnGaps[sourceLayer] = Math.max(columnGaps[sourceLayer], labelWidth(edge.label) + 24);
+      forwardCounts[sourceLayer] += 1;
+      columnGaps[sourceLayer] = Math.max(columnGaps[sourceLayer], labelWidth(edge.label, geometry.scale) + 24 * geometry.scale);
     }
   }
-  const columnX = [MARGIN];
+  forwardCounts.forEach((count, index) => {
+    columnGaps[index] = Math.max(columnGaps[index], (count + 1) * geometry.forwardLaneSpacing);
+  });
+  const columnX = [geometry.margin];
   for (let index = 1; index <= maximumLayer; index += 1) {
-    columnX[index] = columnX[index - 1] + NODE_WIDTH + columnGaps[index - 1];
+    columnX[index] = columnX[index - 1] + geometry.nodeWidth + columnGaps[index - 1];
   }
 
   columns.forEach((column, columnIndex) => {
     if (!column) return;
-    const columnHeight = column.length * NODE_HEIGHT + Math.max(0, column.length - 1) * ROW_GAP;
+    const columnHeight = column.length * geometry.nodeHeight + Math.max(0, column.length - 1) * geometry.rowGap;
     const top = topRouteBand + (drawingHeight - columnHeight) / 2;
     column.forEach((id, rowIndex) => {
       positions.set(id, {
         id,
         name: nodeById.get(id).name,
         x: columnX[columnIndex],
-        y: top + rowIndex * (NODE_HEIGHT + ROW_GAP),
-        width: NODE_WIDTH,
-        height: NODE_HEIGHT,
+        y: top + rowIndex * (geometry.nodeHeight + geometry.rowGap),
+        width: geometry.nodeWidth,
+        height: geometry.nodeHeight,
       });
     });
   });
 
-  const width = Math.max(720, columnX[maximumLayer] + NODE_WIDTH + MARGIN);
+  const width = Math.max(720 * geometry.scale * geometry.horizontalShape, columnX[maximumLayer] + geometry.nodeWidth + geometry.margin);
   const parallelCount = new Map();
-  const ports = assignPorts(graph.edges, positions);
+  const ports = assignPorts(graph.edges, positions, layer, geometry);
   const backwardLanes = new Map(
     graph.edges
       .filter((edge) => positions.get(edge.target).x < positions.get(edge.source).x)
@@ -171,7 +223,7 @@ export function layoutGraph(graph) {
   );
   const longForwardLanes = new Map(
     graph.edges
-      .filter((edge) => positions.get(edge.target).x - positions.get(edge.source).x > NODE_WIDTH + LAYER_GAP)
+      .filter((edge) => layer.get(edge.target) - layer.get(edge.source) > 1)
       .sort((left, right) => {
         const leftSpan = positions.get(left.target).x - positions.get(left.source).x;
         const rightSpan = positions.get(right.target).x - positions.get(right.source).x;
@@ -179,6 +231,23 @@ export function layoutGraph(graph) {
       })
       .map((edge, index) => [edge.id, index]),
   );
+  const forwardLanes = new Map();
+  const forwardGroups = new Map();
+  for (const edge of graph.edges) {
+    const sourceLayer = layer.get(edge.source);
+    const targetLayer = layer.get(edge.target);
+    if (targetLayer !== sourceLayer + 1) continue;
+    if (!forwardGroups.has(sourceLayer)) forwardGroups.set(sourceLayer, []);
+    forwardGroups.get(sourceLayer).push(edge);
+  }
+  for (const edges of forwardGroups.values()) {
+    edges.sort((left, right) => {
+      const leftMiddle = positions.get(left.source).y + positions.get(left.target).y;
+      const rightMiddle = positions.get(right.source).y + positions.get(right.target).y;
+      return leftMiddle - rightMiddle || left.order - right.order;
+    });
+    edges.forEach((edge, index) => forwardLanes.set(edge.id, { index, count: edges.length }));
+  }
   const routeLanes = new Map();
   const nextLane = (key) => {
     const lane = routeLanes.get(key) ?? 0;
@@ -191,13 +260,14 @@ export function layoutGraph(graph) {
     parallelCount.set(key, count + 1);
     const source = positions.get(edge.source);
     const target = positions.get(edge.target);
-    const columnDistance = Math.round(Math.abs(target.x - source.x) / (NODE_WIDTH + LAYER_GAP));
-    const route = target.x < source.x
+    const sourceLayer = layer.get(edge.source);
+    const targetLayer = layer.get(edge.target);
+    const route = targetLayer < sourceLayer
       ? { kind: "backward", lane: backwardLanes.get(edge.id) }
-      : target.x > source.x && columnDistance > 1
+      : targetLayer > sourceLayer + 1
         ? { kind: "long-forward", lane: longForwardLanes.get(edge.id) }
-        : target.x > source.x
-          ? { kind: "forward", lane: nextLane(`forward\u0000${source.x}\u0000${target.x}`) }
+        : targetLayer > sourceLayer
+          ? { kind: "forward", lane: forwardLanes.get(edge.id) }
           : target.id === source.id
             ? { kind: "self", lane: nextLane(`self\u0000${source.id}`) }
             : { kind: "vertical", lane: nextLane(`vertical\u0000${source.x}`) };
@@ -210,10 +280,18 @@ export function layoutGraph(graph) {
       ports.get(`${edge.id}:end`),
       route,
       height,
+      geometry,
     );
   });
 
-  return { nodes: positions, edges: routedEdges, width, height };
+  return {
+    nodes: positions,
+    edges: routedEdges,
+    width,
+    height,
+    scale: geometry.scale,
+    options: geometry.options,
+  };
 }
 
 function longestDagLayers(nodes, outgoing, indegree) {
@@ -292,7 +370,7 @@ function breadthFirstLayers(nodes, outgoing, indegree) {
   return layer;
 }
 
-function assignPorts(edges, positions) {
+function assignPorts(edges, positions, layers, geometry) {
   const groups = new Map();
   const descriptors = [];
 
@@ -303,15 +381,17 @@ function assignPorts(edges, positions) {
     let startSide;
     let endSide;
     let portOrder = edge.order;
-    if (target.x < source.x) {
+    const sourceLayer = layers.get(edge.source);
+    const targetLayer = layers.get(edge.target);
+    if (targetLayer < sourceLayer) {
       startSide = "top";
       endSide = "top";
-      portOrder = -(source.x - target.x);
-    } else if (target.x - source.x > NODE_WIDTH + LAYER_GAP) {
+      portOrder = -(sourceLayer - targetLayer);
+    } else if (targetLayer > sourceLayer + 1) {
       startSide = "bottom";
       endSide = "bottom";
-      portOrder = -(target.x - source.x);
-    } else if (target.x > source.x) {
+      portOrder = -(targetLayer - sourceLayer);
+    } else if (targetLayer > sourceLayer) {
       startSide = "right";
       endSide = "left";
     } else if (target.y > source.y) {
@@ -337,7 +417,7 @@ function assignPorts(edges, positions) {
   for (const group of groups.values()) {
     group.sort((left, right) => left.order - right.order || left.tie - right.tie || left.key.localeCompare(right.key));
     group.forEach((descriptor, index) => {
-      const spacing = descriptor.side === "left" || descriptor.side === "right" ? 14 : 22;
+      const spacing = (descriptor.side === "left" || descriptor.side === "right" ? 14 : 22) * geometry.scale;
       ports.set(descriptor.key, {
         side: descriptor.side,
         offset: (index - (group.length - 1) / 2) * spacing,
@@ -360,44 +440,75 @@ function alternatingOffset(index, spacing) {
   return index % 2 ? magnitude : -magnitude;
 }
 
-function routeEdge(edge, source, target, parallelIndex, startPort, endPort, route, layoutHeight) {
-  const offset = parallelIndex * 18;
+function routeEdge(edge, source, target, parallelIndex, startPort, endPort, route, layoutHeight, geometry) {
+  const unit = geometry.scale;
+  const offset = parallelIndex * 18 * unit;
   let points;
   let labelPoint;
 
   if (route.kind === "self") {
-    const start = { x: source.x + source.width, y: source.y + 19 };
-    const end = { x: source.x + source.width, y: source.y + source.height - 19 };
-    const laneX = start.x + 58 + route.lane * 22 + offset;
+    const start = { x: source.x + source.width, y: source.y + 19 * unit };
+    const end = { x: source.x + source.width, y: source.y + source.height - 19 * unit };
+    const laneX = start.x + 58 * unit + route.lane * 22 * unit + offset;
     points = [start, { x: laneX, y: start.y }, { x: laneX, y: end.y }, end];
     labelPoint = { x: laneX, y: (start.y + end.y) / 2 };
   } else if (route.kind === "forward") {
     const start = portPoint(source, startPort);
     const end = portPoint(target, endPort);
-    const laneX = (start.x + end.x) / 2 + alternatingOffset(route.lane, 16) + offset;
-    points = [start, { x: laneX, y: start.y }, { x: laneX, y: end.y }, end];
-    labelPoint = Math.abs(start.y - end.y) > 22
-      ? { x: laneX, y: (start.y + end.y) / 2 }
-      : { x: (start.x + end.x) / 2, y: start.y };
+    const laneX = start.x + (end.x - start.x) * ((route.lane.index + 1) / (route.lane.count + 1));
+    const trackOffset = alternatingOffset(route.lane.index + 1, 5 * unit);
+    const startTrackY = start.y + trackOffset;
+    const endTrackY = end.y + trackOffset;
+    const startStubX = start.x + (8 + route.lane.index * 3) * unit;
+    const endStubX = end.x - (8 + route.lane.index * 3) * unit;
+    points = [
+      start,
+      { x: startStubX, y: start.y },
+      { x: startStubX, y: startTrackY },
+      { x: laneX, y: startTrackY },
+      { x: laneX, y: endTrackY },
+      { x: endStubX, y: endTrackY },
+      { x: endStubX, y: end.y },
+      end,
+    ];
+    labelPoint = Math.abs(startTrackY - endTrackY) > 22 * unit
+      ? { x: laneX, y: (startTrackY + endTrackY) / 2 }
+      : { x: (start.x + end.x) / 2, y: startTrackY };
   } else if (route.kind === "long-forward") {
     const start = portPoint(source, startPort);
     const end = portPoint(target, endPort);
-    const laneY = layoutHeight - 24 - route.lane * 26;
+    const laneY = layoutHeight - (24 + route.lane * 26) * unit;
+    const startTrackY = start.y + (12 + route.lane * 2) * unit;
+    const endTrackY = end.y + (12 + route.lane * 2) * unit;
+    const exitX = start.x + (12 + route.lane * 8) * unit;
+    const entryX = end.x + (12 + route.lane * 8) * unit;
     points = [
       start,
-      { x: start.x, y: laneY },
-      { x: end.x, y: laneY },
+      { x: start.x, y: startTrackY },
+      { x: exitX, y: startTrackY },
+      { x: exitX, y: laneY },
+      { x: entryX, y: laneY },
+      { x: entryX, y: endTrackY },
+      { x: end.x, y: endTrackY },
       end,
     ];
     labelPoint = { x: (start.x + end.x) / 2, y: laneY };
   } else if (route.kind === "backward") {
     const start = portPoint(source, startPort);
     const end = portPoint(target, endPort);
-    const laneY = 24 + route.lane * 26;
+    const laneY = (24 + route.lane * 26) * unit;
+    const startTrackY = start.y - (12 + route.lane * 2) * unit;
+    const endTrackY = end.y - (12 + route.lane * 2) * unit;
+    const exitX = start.x - (12 + route.lane * 8) * unit;
+    const entryX = end.x - (12 + route.lane * 8) * unit;
     points = [
       start,
-      { x: start.x, y: laneY },
-      { x: end.x, y: laneY },
+      { x: start.x, y: startTrackY },
+      { x: exitX, y: startTrackY },
+      { x: exitX, y: laneY },
+      { x: entryX, y: laneY },
+      { x: entryX, y: endTrackY },
+      { x: end.x, y: endTrackY },
       end,
     ];
     labelPoint = { x: (start.x + end.x) / 2, y: laneY };
@@ -405,9 +516,9 @@ function routeEdge(edge, source, target, parallelIndex, startPort, endPort, rout
     const start = portPoint(source, startPort);
     const end = portPoint(target, endPort);
     const downward = target.y > source.y;
-    const laneX = source.x - 38 - route.lane * 22 - offset;
-    const startY = start.y + (downward ? 22 : -22);
-    const endY = end.y + (downward ? -22 : 22);
+    const laneX = source.x - 38 * unit - route.lane * 22 * unit - offset;
+    const startY = start.y + (downward ? 22 : -22) * unit;
+    const endY = end.y + (downward ? -22 : 22) * unit;
     points = [
       start,
       { x: start.x, y: startY },
@@ -422,14 +533,14 @@ function routeEdge(edge, source, target, parallelIndex, startPort, endPort, rout
   points = points.filter((point, index) => index === 0 || point.x !== points[index - 1].x || point.y !== points[index - 1].y);
   const start = points[0];
   const end = points.at(-1);
-  const arrow = arrowHead(points.at(-2), end);
+  const arrow = arrowHead(points.at(-2), end, unit);
   return { ...edge, points, start, end, labelPoint, arrow };
 }
 
-function arrowHead(previous, end) {
+function arrowHead(previous, end, scale = 1) {
   const angle = Math.atan2(end.y - previous.y, end.x - previous.x);
-  const length = 11;
-  const spread = 5.5;
+  const length = 11 * scale;
+  const spread = 5.5 * scale;
   return [
     end,
     {
@@ -452,13 +563,13 @@ function escapeXml(value) {
     .replaceAll("'", "&apos;");
 }
 
-function labelWidth(label) {
-  return Math.max(38, label.length * 7.1 + 16);
+function labelWidth(label, scale = 1) {
+  return Math.max(38, label.length * 7.1 + 16) * scale;
 }
 
-function nodeLabelLines(name) {
+function nodeLabelLines(name, nodeWidth = BASE_NODE_WIDTH) {
   const words = name.trim().split(/\s+/);
-  if (words.length < 2 || name.length * 7.2 <= NODE_WIDTH - 24) return [name];
+  if (words.length < 2 || name.length * 7.2 <= nodeWidth - 24) return [name];
   let best = null;
   for (let index = 1; index < words.length; index += 1) {
     const lines = [words.slice(0, index).join(" "), words.slice(index).join(" ")];
@@ -469,8 +580,9 @@ function nodeLabelLines(name) {
 }
 
 export function renderSvg(graph, layout) {
+  const scale = layout.scale || 1;
   const edges = layout.edges.map((edge) => {
-    const width = labelWidth(edge.label);
+    const width = labelWidth(edge.label, scale);
     const path = edge.points
       .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
       .join(" ");
@@ -478,18 +590,18 @@ export function renderSvg(graph, layout) {
     return `<g class="edge">
       <path d="${path}" />
       <polygon points="${arrow}" />
-      <rect x="${edge.labelPoint.x - width / 2}" y="${edge.labelPoint.y - 11}" width="${width}" height="22" />
-      <text x="${edge.labelPoint.x}" y="${edge.labelPoint.y + 4}">${escapeXml(edge.label)}</text>
+      <rect x="${edge.labelPoint.x - width / 2}" y="${edge.labelPoint.y - 11 * scale}" width="${width}" height="${22 * scale}" />
+      <text x="${edge.labelPoint.x}" y="${edge.labelPoint.y + 4 * scale}">${escapeXml(edge.label)}</text>
     </g>`;
   }).join("\n");
 
   const nodes = [...layout.nodes.values()].map((node) => {
-    const lines = nodeLabelLines(node.name);
+    const lines = nodeLabelLines(node.name, node.width / scale);
     const longest = Math.max(...lines.map((line) => line.length));
-    const fontSize = Math.max(10, Math.min(14, (node.width - 24) / (longest * 0.58)));
+    const fontSize = Math.max(10 * scale, Math.min(14 * scale, (node.width - 24 * scale) / (longest * 0.58)));
     const centerX = node.x + node.width / 2;
-    const firstY = node.y + node.height / 2 + 5 - (lines.length - 1) * 8;
-    const text = lines.map((line, index) => `<tspan x="${centerX}"${index ? ' dy="17"' : ""}>${escapeXml(line)}</tspan>`).join("");
+    const firstY = node.y + node.height / 2 + 5 * scale - (lines.length - 1) * 8 * scale;
+    const text = lines.map((line, index) => `<tspan x="${centerX}"${index ? ` dy="${17 * scale}"` : ""}>${escapeXml(line)}</tspan>`).join("");
     return `<g class="node">
       <rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" />
       <text x="${centerX}" y="${firstY}" style="font-size:${fontSize.toFixed(2)}px">${text}</text>
@@ -498,12 +610,12 @@ export function renderSvg(graph, layout) {
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${layout.width} ${layout.height}" width="${layout.width}" height="${layout.height}" role="img" aria-label="Compiled state diagram">
     <style>
-      .edge path { fill: none; stroke: #111; stroke-width: 1.6; stroke-linecap: square; stroke-linejoin: round; }
+      .edge path { fill: none; stroke: #111; stroke-width: ${1.6 * scale}; stroke-linecap: square; stroke-linejoin: round; }
       .edge polygon { fill: #111; }
       .edge rect { fill: #fff; }
-      .edge text { fill: #111; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; text-anchor: middle; }
-      .node rect { fill: #fff; stroke: #111; stroke-width: 2; }
-      .node text { fill: #111; font-family: Inter, Arial, sans-serif; font-size: 14px; font-weight: 600; text-anchor: middle; }
+      .edge text { fill: #111; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: ${12 * scale}px; text-anchor: middle; }
+      .node rect { fill: #fff; stroke: #111; stroke-width: ${2 * scale}; }
+      .node text { fill: #111; font-family: Inter, Arial, sans-serif; font-size: ${14 * scale}px; font-weight: 600; text-anchor: middle; }
     </style>
     <rect width="100%" height="100%" fill="#fff" />
     ${edges}
@@ -591,6 +703,6 @@ export function buildPdf(graph, layout) {
 }
 
 export const dimensions = {
-  nodeWidth: NODE_WIDTH,
-  nodeHeight: NODE_HEIGHT,
+  nodeWidth: BASE_NODE_WIDTH,
+  nodeHeight: BASE_NODE_HEIGHT,
 };

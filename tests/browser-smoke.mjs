@@ -45,6 +45,41 @@ try {
   await page.locator('[data-graph-action="zoom-reset"]').click();
   assert.equal(await page.locator('[data-graph-action="zoom-reset"]').textContent(), "100%");
 
+  await page.locator('[data-graph-action="layout-menu"]').click();
+  assert.equal(await page.locator("[data-graph-layout-menu]").isVisible(), true);
+  const naturalLayout = await page.locator("[data-graph-preview] svg").evaluate((svg) => ({
+    width: Number(svg.getAttribute("width")),
+    height: Number(svg.getAttribute("height")),
+  }));
+  await page.locator('[data-graph-layout="shape"]').evaluate((input) => {
+    input.value = "-50";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const tallLayout = await page.locator("[data-graph-preview] svg").evaluate((svg) => ({
+    width: Number(svg.getAttribute("width")),
+    height: Number(svg.getAttribute("height")),
+  }));
+  assert.ok(tallLayout.width / tallLayout.height < naturalLayout.width / naturalLayout.height);
+  await page.locator('[data-graph-layout="size"]').evaluate((input) => {
+    input.value = "125";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const largerLayout = await page.locator("[data-graph-preview] svg").evaluate((svg) => ({
+    width: Number(svg.getAttribute("width")),
+    height: Number(svg.getAttribute("height")),
+  }));
+  assert.ok(largerLayout.width > tallLayout.width && largerLayout.height > tallLayout.height);
+  await page.locator('[data-graph-layout="compression"]').evaluate((input) => {
+    input.value = "70";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  assert.equal(await page.locator('[data-graph-layout-value="shape"]').textContent(), "TALL 50%");
+  assert.equal(await page.locator('[data-graph-layout-value="size"]').textContent(), "125%");
+  assert.equal(await page.locator('[data-graph-layout-value="compression"]').textContent(), "70%");
+  assert.match(await page.locator("[data-graph-layout-dimensions]").textContent(), /^[\d,]+ × [\d,]+$/);
+  await page.locator('[data-graph-action="layout-menu"]').click();
+  assert.equal(await page.locator("[data-graph-layout-menu]").isVisible(), false);
+
   const wheelZoom = await page.locator("[data-graph-preview]").evaluate((preview) => {
     const rect = preview.getBoundingClientRect();
     const svg = preview.querySelector("svg");
@@ -108,6 +143,11 @@ try {
   assert.equal(await page.evaluate(() => window.boxlineEditor.getSource()), source);
   assert.equal(await page.locator("[data-graph-status]").textContent(), "2 STATES · 1 ARROW");
   assert.equal(await page.locator('[data-graph-action="zoom-reset"]').textContent(), wheelZoom.readout);
+  assert.deepEqual(await page.evaluate(() => window.__boxlineWorkspace.getState().windows.graph.layout), {
+    size: 1.25,
+    shape: -0.5,
+    compression: 0.7,
+  });
 
   const downloadPromise = page.waitForEvent("download");
   await page.locator('[data-graph-action="export-pdf"]').click();
@@ -120,6 +160,9 @@ try {
 
   await page.waitForTimeout(200);
   await page.screenshot({ path: join(artifacts.pathname, "desktop.png") });
+  await page.locator('[data-graph-action="layout-menu"]').click();
+  await page.screenshot({ path: join(artifacts.pathname, "layout-panel-desktop.png") });
+  await page.locator('[data-graph-action="layout-menu"]').click();
   assert.deepEqual(errors, []);
 
   const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -133,6 +176,9 @@ try {
   assert.equal(await mobile.locator('[data-window="graph"]').isVisible(), true);
   assert.equal(await mobile.locator('[data-window="graph"] .graph-toolbar').evaluate((toolbar) => toolbar.scrollWidth <= toolbar.clientWidth), true);
   await mobile.screenshot({ path: join(artifacts.pathname, "mobile.png") });
+  await mobile.locator('[data-graph-action="layout-menu"]').click();
+  assert.equal(await mobile.locator("[data-graph-layout-menu]").evaluate((menu) => menu.scrollWidth <= menu.clientWidth), true);
+  await mobile.screenshot({ path: join(artifacts.pathname, "layout-panel-mobile.png") });
   await mobileContext.close();
 
   console.log(JSON.stringify({
@@ -140,7 +186,12 @@ try {
     separateGraph: true,
     intrinsicGraph: intrinsicAfter,
     persistedFile: "DEPENDENCY TEST.boxline",
-    screenshots: ["artifacts/desktop.png", "artifacts/mobile.png"],
+    screenshots: [
+      "artifacts/desktop.png",
+      "artifacts/layout-panel-desktop.png",
+      "artifacts/mobile.png",
+      "artifacts/layout-panel-mobile.png",
+    ],
   }));
 } finally {
   await browser.close();

@@ -1,7 +1,9 @@
 import {
+  DEFAULT_LAYOUT_OPTIONS,
   EXAMPLE_SOURCE,
   buildPdf,
   layoutGraph,
+  normalizeLayoutOptions,
   parseGraph,
   renderSvg,
 } from "./graph.mjs";
@@ -174,7 +176,7 @@ function createWindowState(id) {
     w: app.w,
     h: app.h,
     z: 1,
-    ...(id === "graph" ? { zoom: 1 } : {}),
+    ...(id === "graph" ? { zoom: 1, layout: { ...DEFAULT_LAYOUT_OPTIONS } } : {}),
   };
 }
 
@@ -182,6 +184,7 @@ function normalizeWindowState(saved = {}) {
   const result = {};
   for (const id of Object.keys(APPS)) {
     result[id] = { ...createWindowState(id), ...(saved[id] || {}), id, appId: id };
+    if (id === "graph") result[id].layout = normalizeLayoutOptions(saved[id]?.layout);
   }
   return result;
 }
@@ -544,7 +547,7 @@ function arrangeDesktop(announce = true) {
 
 function updateCompilation(source) {
   const graph = parseGraph(source);
-  const layout = layoutGraph(graph);
+  const layout = layoutGraph(graph, graphLayoutOptions());
   compiled = { graph, layout };
 
   const editorWindow = appWindow("editor");
@@ -601,8 +604,91 @@ function openGraph() {
   focusWindow("graph");
 }
 
+function graphLayoutOptions() {
+  const options = normalizeLayoutOptions(windows.graph?.layout);
+  if (windows.graph) windows.graph.layout = options;
+  return options;
+}
+
+function graphShapeLabel(shape) {
+  if (Math.abs(shape) < 0.02) return "NATURAL";
+  return shape < 0 ? `TALL ${Math.round(Math.abs(shape) * 100)}%` : `WIDE ${Math.round(shape * 100)}%`;
+}
+
+function updateGraphLayoutControls(element = appWindow("graph")) {
+  if (!element) return;
+  const options = graphLayoutOptions();
+  const values = {
+    size: Math.round(options.size * 100),
+    shape: Math.round(options.shape * 100),
+    compression: Math.round(options.compression * 100),
+  };
+  for (const [key, value] of Object.entries(values)) {
+    const input = element.querySelector(`[data-graph-layout="${key}"]`);
+    if (input) {
+      input.value = String(value);
+      input.disabled = !compiled?.graph.nodes.length;
+    }
+  }
+  element.querySelector('[data-graph-layout-value="size"]').textContent = `${values.size}%`;
+  element.querySelector('[data-graph-layout-value="shape"]').textContent = graphShapeLabel(options.shape);
+  element.querySelector('[data-graph-layout-value="compression"]').textContent = `${values.compression}%`;
+  const dimensions = element.querySelector("[data-graph-layout-dimensions]");
+  const ratio = element.querySelector("[data-graph-layout-ratio]");
+  if (compiled?.graph.nodes.length) {
+    const width = Math.round(compiled.layout.width);
+    const height = Math.round(compiled.layout.height);
+    dimensions.textContent = `${width.toLocaleString()} × ${height.toLocaleString()}`;
+    ratio.textContent = `${(width / height).toFixed(2)}:1`;
+  } else {
+    dimensions.textContent = "NO GRAPH";
+    ratio.textContent = "—";
+  }
+}
+
+function setGraphLayoutOption(key, value) {
+  if (!compiled || !windows.graph) return;
+  const element = appWindow("graph");
+  const preview = element?.querySelector("[data-graph-preview]");
+  const centerX = preview?.scrollWidth ? (preview.scrollLeft + preview.clientWidth / 2) / preview.scrollWidth : 0.5;
+  const centerY = preview?.scrollHeight ? (preview.scrollTop + preview.clientHeight / 2) / preview.scrollHeight : 0.5;
+  windows.graph.layout = normalizeLayoutOptions({ ...graphLayoutOptions(), [key]: value });
+  compiled.layout = layoutGraph(compiled.graph, windows.graph.layout);
+  renderGraph();
+  if (preview) {
+    preview.scrollLeft = Math.max(0, centerX * preview.scrollWidth - preview.clientWidth / 2);
+    preview.scrollTop = Math.max(0, centerY * preview.scrollHeight - preview.clientHeight / 2);
+  }
+  scheduleSave();
+}
+
 function setupGraph(element) {
   const preview = element.querySelector("[data-graph-preview]");
+  const layoutButton = element.querySelector('[data-graph-action="layout-menu"]');
+  const layoutMenu = element.querySelector("[data-graph-layout-menu]");
+  layoutButton.addEventListener("click", () => {
+    layoutMenu.hidden = !layoutMenu.hidden;
+    layoutButton.setAttribute("aria-expanded", String(!layoutMenu.hidden));
+    if (!layoutMenu.hidden) updateGraphLayoutControls(element);
+  });
+  element.querySelectorAll("[data-graph-layout]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const key = input.dataset.graphLayout;
+      setGraphLayoutOption(key, Number(input.value) / 100);
+    });
+  });
+  element.querySelector('[data-graph-action="layout-reset"]').addEventListener("click", () => {
+    windows.graph.layout = { ...DEFAULT_LAYOUT_OPTIONS };
+    compiled.layout = layoutGraph(compiled.graph, windows.graph.layout);
+    renderGraph();
+    scheduleSave();
+  });
+  element.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || layoutMenu.hidden) return;
+    layoutMenu.hidden = true;
+    layoutButton.setAttribute("aria-expanded", "false");
+    layoutButton.focus();
+  });
   element.querySelector('[data-graph-action="zoom-out"]').addEventListener("click", () => {
     setGraphZoom(graphZoom() - 0.1);
   });
@@ -708,6 +794,7 @@ function renderGraph() {
   pdf.disabled = disabled;
   png.disabled = disabled;
   applyGraphScale(element);
+  updateGraphLayoutControls(element);
   updateWindowTitles();
 }
 
@@ -948,7 +1035,7 @@ restore();
 const initialFile = validActiveFile();
 if (initialFile) {
   const graph = parseGraph(initialFile.content);
-  compiled = { graph, layout: layoutGraph(graph) };
+  compiled = { graph, layout: layoutGraph(graph, graphLayoutOptions()) };
 }
 
 for (const [id, item] of Object.entries(windows)) {

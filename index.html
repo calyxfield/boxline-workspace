@@ -74,6 +74,7 @@
         <div class="app-toolbar graph-toolbar">
           <span class="graph-status" data-graph-status data-state="empty">WAITING FOR A STATE</span>
           <span class="tool-spacer"></span>
+          <button class="tool-button" data-graph-action="layout-menu" type="button" aria-expanded="false">LAYOUT</button>
           <div class="zoom-controls" aria-label="Graph zoom controls">
             <button class="tool-button zoom-step" data-graph-action="zoom-out" type="button" aria-label="Zoom out">−</button>
             <button class="tool-button zoom-readout" data-graph-action="zoom-reset" type="button" title="Ctrl+scroll to zoom">100%</button>
@@ -82,6 +83,32 @@
           <button class="tool-button" data-graph-action="export-pdf" type="button">PDF</button>
           <button class="tool-button" data-graph-action="export-png" type="button">PNG</button>
         </div>
+        <section class="layout-menu" data-graph-layout-menu aria-label="Graph layout controls" hidden>
+          <header class="layout-menu-header">
+            <span>COMPILED GEOMETRY</span>
+            <strong data-graph-layout-dimensions>NO GRAPH</strong>
+            <span data-graph-layout-ratio>—</span>
+          </header>
+          <label class="layout-control">
+            <span>OVERALL SIZE</span>
+            <output data-graph-layout-value="size">100%</output>
+            <input data-graph-layout="size" type="range" min="50" max="200" step="5" value="100" />
+            <small>50% · 200%</small>
+          </label>
+          <label class="layout-control">
+            <span>GRAPH SHAPE</span>
+            <output data-graph-layout-value="shape">NATURAL</output>
+            <input data-graph-layout="shape" type="range" min="-100" max="100" step="2" value="0" />
+            <small>TALL · WIDE</small>
+          </label>
+          <label class="layout-control">
+            <span>SPACING</span>
+            <output data-graph-layout-value="compression">100%</output>
+            <input data-graph-layout="compression" type="range" min="50" max="175" step="5" value="100" />
+            <small>COMPRESSED · LOOSE</small>
+          </label>
+          <button class="tool-button layout-reset" data-graph-action="layout-reset" type="button">RESET GEOMETRY</button>
+        </section>
         <div class="sheet-frame">
           <div class="graph-preview empty" data-graph-preview aria-live="polite"></div>
           <div class="sheet-meta"><span>AUTOMATIC LAYOUT · CTRL+SCROLL ZOOM</span><span data-graph-file></span></div>
