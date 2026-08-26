@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="A local windowed workspace for editing and compiling Boxline diagrams." />
+    <meta name="theme-color" content="#183746" />
+    <title>Boxline Workspace</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="workstation">
+      <header class="system-bar">
+        <div class="system-mark" aria-hidden="true">BL</div>
+        <div class="system-copy">
+          <strong>BOXLINE WORKSPACE</strong>
+          <span>FILES + DIAGRAM COMPILER</span>
+        </div>
+        <div class="system-spacer"></div>
+        <span class="save-indicator" id="save-indicator">LOCAL / SAVED</span>
+        <button class="system-button" id="arrange-button" type="button">ARRANGE</button>
+        <button class="system-button" id="save-button" type="button">SAVE</button>
+        <time id="clock" aria-label="Current time"></time>
+      </header>
+
+      <section class="desktop-region">
+        <nav class="launcher" aria-label="Applications">
+          <div class="launcher-label">TOOLS</div>
+          <button class="launch-button" data-app="editor" type="button">
+            <span class="launch-icon">BX</span>
+            <span class="launch-name">BOXLINE</span>
+          </button>
+          <button class="launch-button" data-app="files" type="button">
+            <span class="launch-icon">FL</span>
+            <span class="launch-name">FILES</span>
+          </button>
+          <div class="minimized-tray" id="minimized-tray" hidden>
+            <div class="launcher-label">MINIMIZED</div>
+            <div class="minimized-list" id="minimized-list"></div>
+          </div>
+        </nav>
+
+        <div class="desktop-plane" id="desktop" aria-label="Movable Boxline workspace">
+          <div class="desktop-stamp">BOXLINE LOCAL WORKSPACE<strong>DESK 01</strong></div>
+          <div class="snap-preview" id="snap-preview"></div>
+          <div class="toast" id="toast" role="status" aria-live="polite"></div>
+        </div>
+      </section>
+    </main>
+
+    <template id="editor-template">
+      <div class="editor-app">
+        <div class="app-toolbar editor-toolbar">
+          <span class="document-chip"><span class="document-dot"></span><span data-editor-filename></span></span>
+          <span class="tool-readout" data-editor-lines></span>
+          <span class="tool-spacer"></span>
+          <button class="tool-button primary" data-editor-action="open-graph" type="button">OPEN GRAPH</button>
+        </div>
+        <div class="editor-shell">
+          <div class="source-editor" data-editor-host></div>
+          <div class="editor-status">
+            <span><strong>state</strong> Pump:</span>
+            <span>label <strong>-&gt;</strong> Target</span>
+            <span>CTRL+SPACE COMPLETE</span>
+          </div>
+        </div>
+        <p class="editor-help" id="editor-help">Changes compile immediately and save into the open file.</p>
+        <div class="issues" data-editor-issues aria-live="polite"></div>
+      </div>
+    </template>
+
+    <template id="graph-template">
+      <div class="graph-app">
+        <div class="app-toolbar graph-toolbar">
+          <span class="graph-status" data-graph-status data-state="empty">WAITING FOR A STATE</span>
+          <span class="tool-spacer"></span>
+          <button class="tool-button" data-graph-action="export-pdf" type="button">PDF</button>
+          <button class="tool-button" data-graph-action="export-png" type="button">PNG</button>
+        </div>
+        <div class="sheet-frame">
+          <div class="graph-preview empty" data-graph-preview aria-live="polite"></div>
+          <div class="sheet-meta"><span>AUTOMATIC LAYOUT</span><span data-graph-file></span></div>
+        </div>
+      </div>
+    </template>
+
+    <template id="files-template">
+      <div class="files-app">
+        <div class="app-toolbar files-toolbar">
+          <button class="tool-button" data-files-action="up" type="button">↑ UP</button>
+          <button class="tool-button" data-files-action="new-diagram" type="button">NEW DIAGRAM</button>
+          <button class="tool-button" data-files-action="new-folder" type="button">NEW FOLDER</button>
+          <span class="tool-spacer"></span>
+          <nav class="files-path" data-files-path aria-label="Current folder"></nav>
+        </div>
+        <section class="files-view">
+          <form class="file-create" data-file-create hidden>
+            <input data-file-name maxlength="44" aria-label="Name" autocomplete="off" />
+            <button type="submit">CREATE</button>
+            <button type="button" data-files-action="cancel-create">CANCEL</button>
+          </form>
+          <div class="files-hint">DOUBLE-CLICK TO OPEN · DRAG ITEMS ONTO FOLDERS OR PATHS</div>
+          <div class="file-grid" data-file-grid role="list" aria-label="Folder contents"></div>
+        </section>
+      </div>
+    </template>
+
+    <script type="module" src="./workspace.js"></script>
+  </body>
+</html>

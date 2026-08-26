@@ -1,0 +1,299 @@
+# Rubylith bill of materials for Supersymmetry 0.1.16.14.1
+# Every consumed item or fluid is a box feeding a recipe node.
+# Ingredient arrows carry local recipe quantities.
+# Recipe output arrows name only the machine and reusable catalysts or tooling.
+# Byproducts and optional alternate industrial routes are omitted.
+
+# Ethylene glycol
+state Ethylene:
+  50 mB -> Oxidize ethylene
+
+state Oxygen (ethylene oxide):
+  50 mB -> Oxidize ethylene
+
+state Oxidize ethylene:
+  fixed-bed reactor | silver catalyst bed -> Impure ethylene oxide
+
+state Impure ethylene oxide:
+  900 mB -> Purify ethylene oxide
+
+state Purify ethylene oxide:
+  distillation tower -> Ethylene oxide
+
+state Ethylene oxide:
+  85 mB -> Hydrate ethylene oxide
+
+state Water (ethylene glycol):
+  100 mB -> Hydrate ethylene oxide
+
+state Hydrate ethylene oxide:
+  CSTR -> Ethylene glycol mix
+
+state Ethylene glycol mix:
+  1000 mB -> Distill ethylene glycol
+
+state Distill ethylene glycol:
+  distillation tower -> Ethylene glycol
+
+# Dimethyl terephthalate
+state Benzene:
+  50 mB -> Alkylate benzene
+
+state Chloromethane:
+  100 mB -> Alkylate benzene
+
+state Alkylate benzene:
+  tubular reactor | aluminium chloride -> Ortho-para xylene mix
+
+state Ortho-para xylene mix:
+  1000 mB -> Separate xylenes
+
+state Separate xylenes:
+  distillation tower -> Para-xylene
+
+state Para-xylene:
+  50 mB -> First DMT oxidation
+  50 mB -> Second DMT oxidation
+
+state Oxygen (DMT):
+  150 mB -> First DMT oxidation
+  300 mB -> Second DMT oxidation
+
+state First DMT oxidation:
+  fixed-bed reactor | cobalt catalyst bed -> Para-toluic acid
+
+state Para-toluic acid:
+  1000 mB -> First DMT esterification
+
+state Methanol (DMT):
+  1000 mB -> First DMT esterification
+  2000 mB -> Second DMT esterification
+  1000 mB -> Dissolve crude DMT
+
+state First DMT esterification:
+  reaction furnace -> Methyl para-toluate
+
+state Methyl para-toluate:
+  50 mB -> Second DMT oxidation
+
+state Second DMT oxidation:
+  fixed-bed reactor | cobalt catalyst bed -> Para-toluate mix
+
+state Para-toluate mix:
+  2000 mB -> Second DMT esterification
+
+state Second DMT esterification:
+  reaction furnace -> Methyl para-toluate mix
+
+state Methyl para-toluate mix:
+  2000 mB -> Recover crude DMT
+
+state Recover crude DMT:
+  vacuum distillation tower -> Crude dimethyl terephthalate
+
+state Crude dimethyl terephthalate:
+  24 dust -> Dissolve crude DMT
+
+state Dissolve crude DMT:
+  mixer -> Crude DMT solution
+
+state Crude DMT solution:
+  1000 mB -> Crystallize DMT
+
+state Crystallize DMT:
+  crystallizer -> Dimethyl terephthalate
+
+# PET and Mylar
+state Ethylene glycol:
+  1000 mB -> Polymerize PET
+
+state Dimethyl terephthalate:
+  3456 mB -> Polymerize PET
+
+state Polymerize PET:
+  polymerization tank | cobalt acetate -> PET
+
+state PET:
+  1 unit -> Form PET foil
+
+state Form PET foil:
+  foil forming -> PET foil
+
+state PET foil:
+  1 foil -> Assemble Mylar
+
+state Assemble Mylar:
+  assembler | 2 cupronickel springs -> Thin Mylar sheet
+
+# Trimethylolpropane
+state Ethanol:
+  50 mB -> Dehydrogenate ethanol
+
+state Dehydrogenate ethanol:
+  fixed-bed reactor | copper catalyst bed -> Acetaldehyde
+
+state Acetaldehyde:
+  2000 mB -> Condense crotonaldehyde
+
+state Sodium hydroxide solution (TMP):
+  1000 mB -> Condense crotonaldehyde
+  1000 mB -> Synthesize trimethylolpropane
+
+state Condense crotonaldehyde:
+  batch reactor | cupronickel spring -> Crotonaldehyde mix
+
+state Crotonaldehyde mix:
+  1000 mB -> Distill crotonaldehyde
+
+state Distill crotonaldehyde:
+  distillery -> Crotonaldehyde
+
+state Crotonaldehyde:
+  50 mB -> Hydrogenate crotonaldehyde
+
+state Hydrogen:
+  100 mB -> Hydrogenate crotonaldehyde
+
+state Hydrogenate crotonaldehyde:
+  fixed-bed reactor | copper catalyst bed -> Butyraldehyde
+
+state Butyraldehyde:
+  1000 mB -> Synthesize trimethylolpropane
+
+state Formaldehyde:
+  3000 mB -> Synthesize trimethylolpropane
+
+state Synthesize trimethylolpropane:
+  batch reactor -> Trimethylolpropane
+
+# Acrylic acid
+state Acetylene:
+  1000 mB -> Synthesize acrylic acid
+
+state Carbon monoxide:
+  1000 mB -> Synthesize acrylic acid
+
+state Water (acrylic acid):
+  1000 mB -> Synthesize acrylic acid
+
+state Synthesize acrylic acid:
+  reaction furnace | acrylic catalyst -> Acrylic acid
+
+# TMPTA
+state Trimethylolpropane:
+  1 dust -> Esterify TMPTA
+
+state Acrylic acid:
+  3000 mB -> Esterify TMPTA
+
+state Esterify TMPTA:
+  batch reactor | H2SO4 + cupronickel spring -> TMPTA
+
+# Benzenediazonium chloride
+state Sodium nitrate:
+  5 dust -> Roast sodium nitrate
+
+state Roast sodium nitrate:
+  roaster -> Sodium nitrite
+
+state Sodium nitrite:
+  4 dust -> Diazotize aniline
+
+state Hydrochloric acid (diazonium):
+  2000 mB -> Diazotize aniline
+
+state Aniline:
+  1000 mB -> Diazotize aniline
+
+state Diazotize aniline:
+  batch reactor | circuit 1 -> Diazonium chloride solution
+
+state Diazonium chloride solution:
+  4000 mB -> Crystallize diazonium chloride
+
+state Crystallize diazonium chloride:
+  crystallizer | early-metal spring -> Benzenediazonium chloride
+
+# Gelatin, with bone and leather as alternate routes
+state Bone dust:
+  1 dust -> Extract collagen from bone
+
+state Hydrochloric acid (bone route):
+  2000 mB -> Extract collagen from bone
+
+state Extract collagen from bone:
+  chemical bath -> Collagen
+
+state Leather:
+  1 item -> Extract collagen from leather
+
+state Hydrochloric acid (leather route):
+  2000 mB -> Extract collagen from leather
+
+state Extract collagen from leather:
+  chemical bath -> Collagen
+
+state Collagen:
+  1 dust -> Treat collagen
+
+state Sodium hydroxide solution (gelatin):
+  250 mB -> Treat collagen
+
+state Treat collagen:
+  chemical bath -> Treated collagen
+
+state Treated collagen:
+  1 dust -> Separate gelatin
+
+state Heated water:
+  1000 mB -> Separate gelatin
+
+state Separate gelatin:
+  centrifuge -> Gelatin solution
+
+state Gelatin solution:
+  1000 mB -> Distill gelatin
+
+state Distill gelatin:
+  distillery -> Gelatin
+
+# Acrylic photoemulsion
+state TMPTA:
+  8000 mB -> Mix photoemulsion
+
+state Benzenediazonium chloride:
+  1 dust -> Mix photoemulsion
+
+state Gelatin:
+  8 dust -> Mix photoemulsion
+
+state Mix photoemulsion:
+  mixer -> Acrylic photoemulsion
+
+# Rubylith film
+state Acrylic photoemulsion:
+  500 mB -> Coat plastic film
+
+state Plastic foil:
+  1 foil -> Coat plastic film
+
+state Red dye:
+  100 mB -> Coat plastic film
+
+state Coat plastic film:
+  mixer -> Rubylith film
+
+# Final sheet
+state Thin Mylar sheet:
+  1 sheet -> Assemble Rubylith
+
+state Rubylith film:
+  1 film -> Assemble Rubylith
+
+state Glue:
+  100 mB -> Assemble Rubylith
+
+state Assemble Rubylith:
+  HV assembler -> Rubylith
+
+state Rubylith:

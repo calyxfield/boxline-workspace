@@ -1,0 +1,144 @@
+let serial = 0;
+
+function makeId(prefix) {
+  serial += 1;
+  return `${prefix}-${Date.now().toString(36)}-${serial.toString(36)}`;
+}
+
+export function createDefaultFiles(exampleSource, rubylithSource = "") {
+  return {
+    id: "root",
+    type: "folder",
+    name: "BOXLINE WORKSPACE",
+    children: [
+      {
+        id: "folder-examples",
+        type: "folder",
+        name: "EXAMPLES",
+        children: [
+          {
+            id: "file-pump",
+            type: "file",
+            name: "PUMP CONTROL.boxline",
+            content: exampleSource,
+          },
+          ...(rubylithSource ? [{
+            id: "file-rubylith",
+            type: "file",
+            name: "RUBYLITH BILL OF MATERIALS.boxline",
+            content: rubylithSource,
+          }] : []),
+        ],
+      },
+    ],
+  };
+}
+
+export function normalizeFiles(root, fallback) {
+  if (!root || root.type !== "folder" || !Array.isArray(root.children)) return fallback;
+  const seen = new Set();
+  const visit = (node) => {
+    if (!node || typeof node !== "object") return null;
+    const type = node.type === "folder" ? "folder" : "file";
+    const id = typeof node.id === "string" && node.id && !seen.has(node.id)
+      ? node.id
+      : makeId(type);
+    seen.add(id);
+    const name = String(node.name || (type === "folder" ? "UNTITLED FOLDER" : "UNTITLED.boxline"));
+    if (type === "file") return { id, type, name, content: String(node.content || "") };
+    return {
+      id,
+      type,
+      name,
+      children: (Array.isArray(node.children) ? node.children : []).map(visit).filter(Boolean),
+    };
+  };
+  const normalized = visit(root);
+  normalized.id = "root";
+  return normalized;
+}
+
+export function findNode(root, id) {
+  if (!root) return null;
+  if (root.id === id) return root;
+  if (root.type !== "folder") return null;
+  for (const child of root.children) {
+    const match = findNode(child, id);
+    if (match) return match;
+  }
+  return null;
+}
+
+export function findParent(root, id) {
+  if (!root || root.type !== "folder") return null;
+  if (root.children.some((child) => child.id === id)) return root;
+  for (const child of root.children) {
+    const match = findParent(child, id);
+    if (match) return match;
+  }
+  return null;
+}
+
+export function folderTrail(root, id) {
+  const trail = [];
+  const walk = (node) => {
+    if (node.id === id) {
+      trail.push(node);
+      return true;
+    }
+    if (node.type !== "folder") return false;
+    for (const child of node.children) {
+      if (walk(child)) {
+        trail.unshift(node);
+        return true;
+      }
+    }
+    return false;
+  };
+  walk(root);
+  return trail;
+}
+
+export function createFolder(root, parentId, name) {
+  const parent = findNode(root, parentId);
+  if (!parent || parent.type !== "folder") return null;
+  const node = { id: makeId("folder"), type: "folder", name, children: [] };
+  parent.children.push(node);
+  return node;
+}
+
+export function createDiagram(root, parentId, name, content = "") {
+  const parent = findNode(root, parentId);
+  if (!parent || parent.type !== "folder") return null;
+  const cleanName = /\.boxline$/i.test(name) ? name : `${name}.boxline`;
+  const node = { id: makeId("file"), type: "file", name: cleanName, content };
+  parent.children.push(node);
+  return node;
+}
+
+export function moveNode(root, nodeId, targetFolderId) {
+  if (nodeId === "root" || nodeId === targetFolderId) return false;
+  const sourceParent = findParent(root, nodeId);
+  const target = findNode(root, targetFolderId);
+  const node = findNode(root, nodeId);
+  if (!sourceParent || !target || target.type !== "folder" || !node) return false;
+  if (node.type === "folder" && findNode(node, targetFolderId)) return false;
+  if (sourceParent.id === target.id) return false;
+  sourceParent.children = sourceParent.children.filter((child) => child.id !== nodeId);
+  target.children.push(node);
+  return true;
+}
+
+export function uniqueName(folder, requested, suffix = "") {
+  const taken = new Set(folder.children.map((child) => child.name.toLowerCase()));
+  const raw = String(requested || "").trim() || (suffix ? "UNTITLED" : "NEW FOLDER");
+  const hasSuffix = suffix && raw.toLowerCase().endsWith(suffix.toLowerCase());
+  const stem = hasSuffix ? raw.slice(0, -suffix.length) : raw;
+  let candidate = `${stem}${suffix}`;
+  let index = 2;
+  while (taken.has(candidate.toLowerCase())) {
+    candidate = `${stem} ${index}${suffix}`;
+    index += 1;
+  }
+  return candidate;
+}
