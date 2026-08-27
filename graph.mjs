@@ -9,6 +9,7 @@ export const DEFAULT_LAYOUT_OPTIONS = Object.freeze({
   size: 1,
   shape: 0,
   compression: 1,
+  buffer: 32,
 });
 
 function clamp(value, minimum, maximum, fallback) {
@@ -22,6 +23,7 @@ export function normalizeLayoutOptions(options = {}) {
     size: clamp(options.size, 0.5, 2, DEFAULT_LAYOUT_OPTIONS.size),
     shape: clamp(options.shape, -1, 1, DEFAULT_LAYOUT_OPTIONS.shape),
     compression: clamp(options.compression, 0.5, 1.75, DEFAULT_LAYOUT_OPTIONS.compression),
+    buffer: clamp(options.buffer, 8, 96, DEFAULT_LAYOUT_OPTIONS.buffer),
   };
 }
 
@@ -38,8 +40,9 @@ function layoutGeometry(options) {
     nodeHeight: BASE_NODE_HEIGHT * normalized.size,
     layerGap: BASE_LAYER_GAP * normalized.size * normalized.compression * horizontalShape,
     rowGap: BASE_ROW_GAP * normalized.size * normalized.compression * verticalShape,
-    margin: BASE_MARGIN * normalized.size,
+    margin: Math.max(BASE_MARGIN, normalized.buffer + 32) * normalized.size,
     forwardLaneSpacing: BASE_FORWARD_LANE_SPACING * normalized.size,
+    buffer: normalized.buffer * normalized.size,
   };
 }
 
@@ -165,10 +168,13 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
   });
 
   const maximumRows = Math.max(...columns.map((column) => column?.length ?? 0));
-  const contentHeight = maximumRows * geometry.nodeHeight + Math.max(0, maximumRows - 1) * geometry.rowGap;
+  const rowGap = Math.max(geometry.rowGap, geometry.buffer * 2 + 16 * geometry.scale);
+  const contentHeight = maximumRows * geometry.nodeHeight + Math.max(0, maximumRows - 1) * rowGap;
   const backwardCount = graph.edges.filter((edge) => layer.get(edge.target) < layer.get(edge.source)).length;
   const longForwardCount = graph.edges.filter((edge) => layer.get(edge.target) - layer.get(edge.source) > 1).length;
-  const topRouteBand = backwardCount ? (34 + (backwardCount - 1) * 26) * geometry.scale : 0;
+  const topRouteBand = backwardCount
+    ? geometry.buffer + (22 + (backwardCount - 1) * 26) * geometry.scale
+    : 0;
   const bottomRouteBand = longForwardCount ? (34 + (longForwardCount - 1) * 26) * geometry.scale : 0;
   const drawingHeight = Math.max(420 * geometry.scale * geometry.verticalShape, contentHeight + (2 * geometry.margin));
   const height = drawingHeight + topRouteBand + bottomRouteBand;
@@ -185,7 +191,12 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
     }
   }
   forwardCounts.forEach((count, index) => {
-    columnGaps[index] = Math.max(columnGaps[index], (count + 1) * geometry.forwardLaneSpacing);
+    columnGaps[index] = Math.max(
+      columnGaps[index],
+      geometry.buffer * 2
+        + count * 6 * geometry.scale
+        + (count + 1) * geometry.forwardLaneSpacing,
+    );
   });
   const columnX = [geometry.margin];
   for (let index = 1; index <= maximumLayer; index += 1) {
@@ -194,14 +205,14 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
 
   columns.forEach((column, columnIndex) => {
     if (!column) return;
-    const columnHeight = column.length * geometry.nodeHeight + Math.max(0, column.length - 1) * geometry.rowGap;
+    const columnHeight = column.length * geometry.nodeHeight + Math.max(0, column.length - 1) * rowGap;
     const top = topRouteBand + (drawingHeight - columnHeight) / 2;
     column.forEach((id, rowIndex) => {
       positions.set(id, {
         id,
         name: nodeById.get(id).name,
         x: columnX[columnIndex],
-        y: top + rowIndex * (geometry.nodeHeight + geometry.rowGap),
+        y: top + rowIndex * (geometry.nodeHeight + rowGap),
         width: geometry.nodeWidth,
         height: geometry.nodeHeight,
       });
@@ -554,7 +565,7 @@ function routeLongForwardEdge(edge, source, target, startPort, endPort, route, p
   const unit = geometry.scale;
   const start = portPoint(source, startPort);
   const end = portPoint(target, endPort);
-  const stubDistance = (14 + route.lane * 6) * unit;
+  const stubDistance = geometry.buffer + route.lane * 6 * unit;
   const chooseUnusedVertical = (initial, minimum, maximum) => {
     for (let index = 0; index < 24; index += 1) {
       const candidate = initial + alternatingOffset(index, 3 * unit);
@@ -567,8 +578,16 @@ function routeLongForwardEdge(edge, source, target, startPort, endPort, route, p
     return initial;
   };
   const middleX = (start.x + end.x) / 2;
-  const exitX = chooseUnusedVertical(start.x + stubDistance, start.x + 3 * unit, middleX - 3 * unit);
-  const entryX = chooseUnusedVertical(end.x - stubDistance, middleX + 3 * unit, end.x - 3 * unit);
+  const exitX = chooseUnusedVertical(
+    start.x + stubDistance,
+    start.x + geometry.buffer - unit,
+    middleX - 3 * unit,
+  );
+  const entryX = chooseUnusedVertical(
+    end.x - stubDistance,
+    middleX + 3 * unit,
+    end.x - geometry.buffer + unit,
+  );
   const left = Math.min(exitX, entryX);
   const right = Math.max(exitX, entryX);
   const clearance = 16 * unit;
@@ -651,18 +670,22 @@ function routeEdge(edge, source, target, parallelIndex, startPort, endPort, rout
   if (route.kind === "self") {
     const start = { x: source.x + source.width, y: source.y + 19 * unit };
     const end = { x: source.x + source.width, y: source.y + source.height - 19 * unit };
-    const laneX = start.x + 58 * unit + route.lane * 22 * unit + offset;
+    const laneX = start.x + geometry.buffer + route.lane * 22 * unit + offset;
     points = [start, { x: laneX, y: start.y }, { x: laneX, y: end.y }, end];
     labelPoint = { x: laneX, y: (start.y + end.y) / 2 };
   } else if (route.kind === "forward") {
     const start = portPoint(source, startPort);
     const end = portPoint(target, endPort);
-    const laneX = start.x + (end.x - start.x) * ((route.lane.index + 1) / (route.lane.count + 1));
+    const laneSpread = route.lane.count * 3 * unit;
+    const laneInset = route.lane.index * 3 * unit;
+    const laneLeft = start.x + geometry.buffer + laneSpread + geometry.forwardLaneSpacing;
+    const laneRight = end.x - geometry.buffer - laneSpread - geometry.forwardLaneSpacing;
+    const laneX = laneLeft + (laneRight - laneLeft) * ((route.lane.index + 1) / (route.lane.count + 1));
     const trackOffset = alternatingOffset(route.lane.index + 1, 5 * unit);
     const startTrackY = start.y + trackOffset;
     const endTrackY = end.y + trackOffset;
-    const startStubX = start.x + (8 + route.lane.index * 3) * unit;
-    const endStubX = end.x - (8 + route.lane.index * 3) * unit;
+    const startStubX = start.x + geometry.buffer + laneInset;
+    const endStubX = end.x - geometry.buffer - laneInset;
     points = [
       start,
       { x: startStubX, y: start.y },
@@ -680,8 +703,8 @@ function routeEdge(edge, source, target, parallelIndex, startPort, endPort, rout
     const start = portPoint(source, startPort);
     const end = portPoint(target, endPort);
     const laneY = (24 + route.lane * 26) * unit;
-    const startTrackY = start.y - (12 + route.lane * 2) * unit;
-    const endTrackY = end.y - (12 + route.lane * 2) * unit;
+    const startTrackY = start.y - geometry.buffer - route.lane * 2 * unit;
+    const endTrackY = end.y - geometry.buffer - route.lane * 2 * unit;
     const exitX = start.x - (12 + route.lane * 8) * unit;
     const entryX = end.x - (12 + route.lane * 8) * unit;
     points = [
@@ -700,8 +723,8 @@ function routeEdge(edge, source, target, parallelIndex, startPort, endPort, rout
     const end = portPoint(target, endPort);
     const downward = target.y > source.y;
     const laneX = source.x - 38 * unit - route.lane * 22 * unit - offset;
-    const startY = start.y + (downward ? 22 : -22) * unit;
-    const endY = end.y + (downward ? -22 : 22) * unit;
+    const startY = start.y + (downward ? geometry.buffer : -geometry.buffer);
+    const endY = end.y + (downward ? -geometry.buffer : geometry.buffer);
     points = [
       start,
       { x: start.x, y: startY },

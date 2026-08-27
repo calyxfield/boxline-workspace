@@ -54,6 +54,17 @@ const APPS = Object.freeze({
     w: 650,
     h: 610,
   }),
+  layout: Object.freeze({
+    code: "LY",
+    title: "GRAPH LAYOUT",
+    template: "layout-template",
+    minW: 310,
+    minH: 260,
+    x: 520,
+    y: 170,
+    w: 430,
+    h: 390,
+  }),
   files: Object.freeze({
     code: "FL",
     title: "PROJECT FILES",
@@ -114,8 +125,9 @@ function appWindow(id) {
 function windowTitle(id) {
   const app = APPS[id];
   const file = fileNode();
-  if ((id === "editor" || id === "graph") && file) {
-    return `${file.name} / ${id === "editor" ? "EDITOR" : "GRAPH"}`;
+  if (["editor", "graph", "layout"].includes(id) && file) {
+    const suffix = id === "editor" ? "EDITOR" : id === "graph" ? "GRAPH" : "LAYOUT";
+    return `${file.name} / ${suffix}`;
   }
   return app.title;
 }
@@ -266,7 +278,7 @@ function focusWindow(id) {
 }
 
 function updateWindowTitles() {
-  for (const id of ["editor", "graph"]) {
+  for (const id of ["editor", "graph", "layout"]) {
     const element = appWindow(id);
     if (!element) continue;
     element.querySelector(".window-title").textContent = windowTitle(id);
@@ -311,6 +323,7 @@ function makeWindow(id) {
   installResize(id, element);
   if (id === "editor") setupEditor(element);
   if (id === "graph") setupGraph(element);
+  if (id === "layout") setupLayout(element);
   if (id === "files") setupFiles(element);
   return element;
 }
@@ -566,6 +579,7 @@ function updateCompilation(source) {
     }
   }
   renderGraph();
+  updateGraphLayoutControls();
 }
 
 function setupEditor(element) {
@@ -615,13 +629,14 @@ function graphShapeLabel(shape) {
   return shape < 0 ? `TALL ${Math.round(Math.abs(shape) * 100)}%` : `WIDE ${Math.round(shape * 100)}%`;
 }
 
-function updateGraphLayoutControls(element = appWindow("graph")) {
+function updateGraphLayoutControls(element = appWindow("layout")) {
   if (!element) return;
   const options = graphLayoutOptions();
   const values = {
     size: Math.round(options.size * 100),
     shape: Math.round(options.shape * 100),
     compression: Math.round(options.compression * 100),
+    buffer: Math.round(options.buffer),
   };
   for (const [key, value] of Object.entries(values)) {
     const input = element.querySelector(`[data-graph-layout="${key}"]`);
@@ -633,6 +648,7 @@ function updateGraphLayoutControls(element = appWindow("graph")) {
   element.querySelector('[data-graph-layout-value="size"]').textContent = `${values.size}%`;
   element.querySelector('[data-graph-layout-value="shape"]').textContent = graphShapeLabel(options.shape);
   element.querySelector('[data-graph-layout-value="compression"]').textContent = `${values.compression}%`;
+  element.querySelector('[data-graph-layout-value="buffer"]').textContent = `${values.buffer} PX`;
   const dimensions = element.querySelector("[data-graph-layout-dimensions]");
   const ratio = element.querySelector("[data-graph-layout-ratio]");
   if (compiled?.graph.nodes.length) {
@@ -664,30 +680,9 @@ function setGraphLayoutOption(key, value) {
 
 function setupGraph(element) {
   const preview = element.querySelector("[data-graph-preview]");
-  const layoutButton = element.querySelector('[data-graph-action="layout-menu"]');
-  const layoutMenu = element.querySelector("[data-graph-layout-menu]");
-  layoutButton.addEventListener("click", () => {
-    layoutMenu.hidden = !layoutMenu.hidden;
-    layoutButton.setAttribute("aria-expanded", String(!layoutMenu.hidden));
-    if (!layoutMenu.hidden) updateGraphLayoutControls(element);
-  });
-  element.querySelectorAll("[data-graph-layout]").forEach((input) => {
-    input.addEventListener("input", () => {
-      const key = input.dataset.graphLayout;
-      setGraphLayoutOption(key, Number(input.value) / 100);
-    });
-  });
-  element.querySelector('[data-graph-action="layout-reset"]').addEventListener("click", () => {
-    windows.graph.layout = { ...DEFAULT_LAYOUT_OPTIONS };
-    compiled.layout = layoutGraph(compiled.graph, windows.graph.layout);
-    renderGraph();
-    scheduleSave();
-  });
-  element.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || layoutMenu.hidden) return;
-    layoutMenu.hidden = true;
-    layoutButton.setAttribute("aria-expanded", "false");
-    layoutButton.focus();
+  element.querySelector('[data-graph-action="open-layout"]').addEventListener("click", () => {
+    openWindow("layout");
+    updateGraphLayoutControls();
   });
   element.querySelector('[data-graph-action="zoom-out"]').addEventListener("click", () => {
     setGraphZoom(graphZoom() - 0.1);
@@ -713,6 +708,24 @@ function setupGraph(element) {
     });
   });
   renderGraph();
+}
+
+function setupLayout(element) {
+  element.querySelectorAll("[data-graph-layout]").forEach((input) => {
+    input.addEventListener("input", () => {
+      const key = input.dataset.graphLayout;
+      const value = key === "buffer" ? Number(input.value) : Number(input.value) / 100;
+      setGraphLayoutOption(key, value);
+    });
+  });
+  element.querySelector('[data-graph-action="layout-reset"]').addEventListener("click", () => {
+    windows.graph.layout = { ...DEFAULT_LAYOUT_OPTIONS };
+    compiled.layout = layoutGraph(compiled.graph, windows.graph.layout);
+    renderGraph();
+    updateGraphLayoutControls(element);
+    scheduleSave();
+  });
+  updateGraphLayoutControls(element);
 }
 
 function graphZoom() {
@@ -794,7 +807,7 @@ function renderGraph() {
   pdf.disabled = disabled;
   png.disabled = disabled;
   applyGraphScale(element);
-  updateGraphLayoutControls(element);
+  updateGraphLayoutControls();
   updateWindowTitles();
 }
 

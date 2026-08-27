@@ -124,5 +124,26 @@ test("layout controls change intrinsic geometry independently", () => {
     size: 2,
     shape: -1,
     compression: 0.5,
+    buffer: 32,
   });
+});
+
+test("box buffer sets the minimum straight lead at both ends of every arrow", async () => {
+  const source = await readFile(new URL("../benchmarks/rubylith-bill-of-materials.boxline", import.meta.url), "utf8");
+  const graph = parseGraph(source);
+  for (const buffer of [8, 32, 96]) {
+    const layout = layoutGraph(graph, { buffer });
+    for (const edge of layout.edges) {
+      const first = edge.points[0];
+      const firstTurn = edge.points[1];
+      const lastTurn = edge.points.at(-2);
+      const last = edge.points.at(-1);
+      const startLead = Math.abs(firstTurn.x - first.x) + Math.abs(firstTurn.y - first.y);
+      const endLead = Math.abs(last.x - lastTurn.x) + Math.abs(last.y - lastTurn.y);
+      assert.ok(startLead >= buffer - 1e-6, `${edge.id} starts with ${startLead}px at ${buffer}px buffer`);
+      assert.ok(endLead >= buffer - 1e-6, `${edge.id} ends with ${endLead}px at ${buffer}px buffer`);
+    }
+    assert.deepEqual(nodeIntersections(layout), []);
+    assert.equal(collinearOverlaps(layout).length, 0);
+  }
 });
