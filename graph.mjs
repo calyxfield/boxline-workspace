@@ -4,6 +4,7 @@ const BASE_LAYER_GAP = 168;
 const BASE_ROW_GAP = 76;
 const BASE_MARGIN = 64;
 const BASE_FORWARD_LANE_SPACING = 16;
+const BASE_PARALLEL_SPACING = 14;
 
 export const DEFAULT_LAYOUT_OPTIONS = Object.freeze({
   size: 1,
@@ -42,6 +43,7 @@ function layoutGeometry(options) {
     rowGap: BASE_ROW_GAP * normalized.size * normalized.compression * verticalShape,
     margin: Math.max(BASE_MARGIN, normalized.buffer + 32) * normalized.size,
     forwardLaneSpacing: BASE_FORWARD_LANE_SPACING * normalized.size,
+    parallelSpacing: BASE_PARALLEL_SPACING * normalized.size,
     buffer: normalized.buffer * normalized.size,
   };
 }
@@ -194,8 +196,8 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
     columnGaps[index] = Math.max(
       columnGaps[index],
       geometry.buffer * 2
-        + count * 6 * geometry.scale
-        + (count + 1) * geometry.forwardLaneSpacing,
+        + Math.max(0, count - 1) * geometry.parallelSpacing
+        + 2 * geometry.forwardLaneSpacing,
     );
   });
   const columnX = [geometry.margin];
@@ -460,7 +462,9 @@ function assignPorts(edges, positions, layers, geometry) {
   for (const group of groups.values()) {
     group.sort((left, right) => left.order - right.order || left.tie - right.tie || left.key.localeCompare(right.key));
     group.forEach((descriptor, index) => {
-      const spacing = (descriptor.side === "left" || descriptor.side === "right" ? 14 : 22) * geometry.scale;
+      const spacing = descriptor.side === "left" || descriptor.side === "right"
+        ? geometry.parallelSpacing
+        : 22 * geometry.scale;
       ports.set(descriptor.key, {
         side: descriptor.side,
         offset: (index - (group.length - 1) / 2) * spacing,
@@ -499,11 +503,11 @@ function routeSegments(edge) {
   return segments;
 }
 
-function segmentsOverlap(left, right) {
+function parallelSegmentsTooClose(left, right, clearance) {
   if (left.horizontal !== right.horizontal) return false;
   const leftLine = left.horizontal ? left.start.y : left.start.x;
   const rightLine = right.horizontal ? right.start.y : right.start.x;
-  if (Math.abs(leftLine - rightLine) > 1e-6) return false;
+  if (Math.abs(leftLine - rightLine) >= clearance - 1e-6) return false;
   const leftRange = left.horizontal
     ? [Math.min(left.start.x, left.end.x), Math.max(left.start.x, left.end.x)]
     : [Math.min(left.start.y, left.end.y), Math.max(left.start.y, left.end.y)];
@@ -566,15 +570,24 @@ function routeLongForwardEdge(edge, source, target, startPort, endPort, route, p
   const unit = geometry.scale;
   const start = portPoint(source, startPort);
   const end = portPoint(target, endPort);
-  const stubDistance = geometry.buffer + route.lane * 6 * unit;
-  const chooseUnusedVertical = (initial, minimum, maximum) => {
+  const stubDistance = geometry.buffer + route.lane * geometry.parallelSpacing;
+  const chooseUnusedVertical = (initial, minimum, maximum, leadPoint, leadFromPort) => {
     for (let index = 0; index < 24; index += 1) {
-      const candidate = initial + alternatingOffset(index, 3 * unit);
+      const candidate = initial + alternatingOffset(index, geometry.parallelSpacing);
       if (candidate <= minimum || candidate >= maximum) continue;
-      const occupied = occupiedSegments.some((segment) => (
-        !segment.horizontal && Math.abs(segment.start.x - candidate) <= 1e-6
+      const verticalOccupied = occupiedSegments.some((segment) => (
+        !segment.horizontal && Math.abs(segment.start.x - candidate) < geometry.parallelSpacing - 1e-6
       ));
-      if (!occupied) return candidate;
+      if (verticalOccupied) continue;
+      const lead = {
+        horizontal: true,
+        start: leadFromPort ? leadPoint : { x: candidate, y: leadPoint.y },
+        end: leadFromPort ? { x: candidate, y: leadPoint.y } : leadPoint,
+      };
+      const leadOccupied = occupiedSegments.some((segment) => (
+        parallelSegmentsTooClose(lead, segment, geometry.parallelSpacing)
+      ));
+      if (!leadOccupied) return candidate;
     }
     return initial;
   };
@@ -583,11 +596,15 @@ function routeLongForwardEdge(edge, source, target, startPort, endPort, route, p
     start.x + stubDistance,
     start.x + geometry.buffer - unit,
     middleX - 3 * unit,
+    start,
+    true,
   );
   const entryX = chooseUnusedVertical(
     end.x - stubDistance,
     middleX + 3 * unit,
     end.x - geometry.buffer + unit,
+    end,
+    false,
   );
   const left = Math.min(exitX, entryX);
   const right = Math.max(exitX, entryX);
@@ -610,7 +627,7 @@ function routeLongForwardEdge(edge, source, target, startPort, endPort, route, p
     if (maximum < minimum) continue;
     candidateYs.add(Math.max(minimum, Math.min(maximum, preferredY)));
     candidateYs.add((minimum + maximum) / 2);
-    for (let candidate = minimum; candidate <= maximum; candidate += 8 * unit) {
+    for (let candidate = minimum; candidate <= maximum; candidate += geometry.parallelSpacing) {
       candidateYs.add(candidate);
     }
     candidateYs.add(maximum);
@@ -628,7 +645,9 @@ function routeLongForwardEdge(edge, source, target, startPort, endPort, route, p
     ].filter((point, index, list) => index === 0 || point.x !== list[index - 1].x || point.y !== list[index - 1].y);
     const candidate = { id: edge.id, points };
     const segments = routeSegments(candidate);
-    if (segments.some((segment) => occupiedSegments.some((occupied) => segmentsOverlap(segment, occupied)))) continue;
+    if (segments.some((segment) => occupiedSegments.some((occupied) => (
+      parallelSegmentsTooClose(segment, occupied, geometry.parallelSpacing)
+    )))) continue;
     const crossings = segments.reduce((total, segment) => (
       total + occupiedSegments.filter((occupied) => segmentsCross(segment, occupied)).length
     ), 0);
@@ -677,12 +696,11 @@ function routeEdge(edge, source, target, parallelIndex, startPort, endPort, rout
   } else if (route.kind === "forward") {
     const start = portPoint(source, startPort);
     const end = portPoint(target, endPort);
-    const laneSpread = route.lane.count * 3 * unit;
-    const laneLeft = start.x + geometry.buffer + laneSpread + geometry.forwardLaneSpacing;
-    const laneRight = end.x - geometry.buffer - laneSpread - geometry.forwardLaneSpacing;
+    const laneLeft = start.x + geometry.buffer + geometry.forwardLaneSpacing;
+    const laneRight = end.x - geometry.buffer - geometry.forwardLaneSpacing;
     const preferredLaneX = laneLeft + (laneRight - laneLeft) * ((route.lane.index + 1) / (route.lane.count + 1));
     const laneXs = [];
-    for (let laneX = laneLeft; laneX <= laneRight; laneX += 3 * unit) laneXs.push(laneX);
+    for (let laneX = laneLeft; laneX <= laneRight; laneX += geometry.parallelSpacing) laneXs.push(laneX);
     laneXs.push(laneRight, preferredLaneX);
     laneXs.sort((left, right) => Math.abs(left - preferredLaneX) - Math.abs(right - preferredLaneX));
     let laneX = preferredLaneX;
@@ -698,7 +716,9 @@ function routeEdge(edge, source, target, parallelIndex, startPort, endPort, rout
         ],
       };
       const segments = routeSegments(candidate);
-      if (segments.some((segment) => occupiedSegments.some((occupied) => segmentsOverlap(segment, occupied)))) continue;
+      if (segments.some((segment) => occupiedSegments.some((occupied) => (
+        parallelSegmentsTooClose(segment, occupied, geometry.parallelSpacing)
+      )))) continue;
       const crossings = segments.reduce((total, segment) => (
         total + occupiedSegments.filter((occupied) => segmentsCross(segment, occupied)).length
       ), 0);
@@ -720,10 +740,10 @@ function routeEdge(edge, source, target, parallelIndex, startPort, endPort, rout
     const start = portPoint(source, startPort);
     const end = portPoint(target, endPort);
     const laneY = (24 + route.lane * 26) * unit;
-    const startTrackY = start.y - geometry.buffer - route.lane * 2 * unit;
-    const endTrackY = end.y - geometry.buffer - route.lane * 2 * unit;
-    const exitX = start.x - (12 + route.lane * 8) * unit;
-    const entryX = end.x - (12 + route.lane * 8) * unit;
+    const startTrackY = start.y - geometry.buffer - route.lane * geometry.parallelSpacing;
+    const endTrackY = end.y - geometry.buffer - route.lane * geometry.parallelSpacing;
+    const exitX = start.x - 12 * unit - route.lane * geometry.parallelSpacing;
+    const entryX = end.x - 12 * unit - route.lane * geometry.parallelSpacing;
     points = [
       start,
       { x: start.x, y: startTrackY },

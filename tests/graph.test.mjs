@@ -38,6 +38,24 @@ function collinearOverlaps(layout) {
   return overlaps;
 }
 
+function parallelClearanceViolations(layout, spacing = 14 * layout.scale) {
+  const segments = orthogonalSegments(layout);
+  const violations = [];
+  for (let leftIndex = 0; leftIndex < segments.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < segments.length; rightIndex += 1) {
+      const left = segments[leftIndex];
+      const right = segments[rightIndex];
+      if (left.edge === right.edge || left.axis !== right.axis) continue;
+      const overlap = Math.min(left.end, right.end) - Math.max(left.start, right.start);
+      const distance = Math.abs(left.line - right.line);
+      if (overlap > 1e-6 && distance < spacing - 1e-6) {
+        violations.push({ left, right, distance, overlap });
+      }
+    }
+  }
+  return violations;
+}
+
 function nodeIntersections(layout) {
   const intersections = [];
   for (const edge of layout.edges) {
@@ -90,6 +108,7 @@ test("Rubylith routes stay clear, compact, and distinct", async () => {
   const layout = layoutGraph(graph);
   assert.equal(graph.errors.length, 0);
   assert.equal(collinearOverlaps(layout).length, 0);
+  assert.deepEqual(parallelClearanceViolations(layout), []);
   assert.deepEqual(nodeIntersections(layout), []);
 
   const worstDetour = Math.max(...layout.edges.map((edge) => {
@@ -123,6 +142,7 @@ test("Rubylith route safety survives the layout-control extremes", async () => {
     const layout = layoutGraph(graph, options);
     assert.deepEqual(nodeIntersections(layout), []);
     assert.equal(collinearOverlaps(layout).length, 0);
+    assert.deepEqual(parallelClearanceViolations(layout), []);
   }
 });
 
@@ -163,5 +183,6 @@ test("box buffer sets the minimum straight lead at both ends of every arrow", as
     }
     assert.deepEqual(nodeIntersections(layout), []);
     assert.equal(collinearOverlaps(layout).length, 0);
+    assert.deepEqual(parallelClearanceViolations(layout), []);
   }
 });
