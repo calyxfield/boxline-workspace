@@ -300,6 +300,7 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
       ports.get(`${edge.id}:end`),
       route,
       geometry,
+      occupiedSegments,
     );
     routedById.set(edge.id, routed);
     occupiedSegments.push(...routeSegments(routed));
@@ -661,7 +662,7 @@ function routeLongForwardEdge(edge, source, target, startPort, endPort, route, p
   return { ...edge, points, start: points[0], end: points.at(-1), labelPoint, arrow };
 }
 
-function routeEdge(edge, source, target, parallelIndex, startPort, endPort, route, geometry) {
+function routeEdge(edge, source, target, parallelIndex, startPort, endPort, route, geometry, occupiedSegments = []) {
   const unit = geometry.scale;
   const offset = parallelIndex * 18 * unit;
   let points;
@@ -677,28 +678,44 @@ function routeEdge(edge, source, target, parallelIndex, startPort, endPort, rout
     const start = portPoint(source, startPort);
     const end = portPoint(target, endPort);
     const laneSpread = route.lane.count * 3 * unit;
-    const laneInset = route.lane.index * 3 * unit;
     const laneLeft = start.x + geometry.buffer + laneSpread + geometry.forwardLaneSpacing;
     const laneRight = end.x - geometry.buffer - laneSpread - geometry.forwardLaneSpacing;
-    const laneX = laneLeft + (laneRight - laneLeft) * ((route.lane.index + 1) / (route.lane.count + 1));
-    const trackOffset = alternatingOffset(route.lane.index + 1, 5 * unit);
-    const startTrackY = start.y + trackOffset;
-    const endTrackY = end.y + trackOffset;
-    const startStubX = start.x + geometry.buffer + laneInset;
-    const endStubX = end.x - geometry.buffer - laneInset;
+    const preferredLaneX = laneLeft + (laneRight - laneLeft) * ((route.lane.index + 1) / (route.lane.count + 1));
+    const laneXs = [];
+    for (let laneX = laneLeft; laneX <= laneRight; laneX += 3 * unit) laneXs.push(laneX);
+    laneXs.push(laneRight, preferredLaneX);
+    laneXs.sort((left, right) => Math.abs(left - preferredLaneX) - Math.abs(right - preferredLaneX));
+    let laneX = preferredLaneX;
+    let bestScore = Infinity;
+    for (const candidateX of laneXs) {
+      const candidate = {
+        id: edge.id,
+        points: [
+          start,
+          { x: candidateX, y: start.y },
+          { x: candidateX, y: end.y },
+          end,
+        ],
+      };
+      const segments = routeSegments(candidate);
+      if (segments.some((segment) => occupiedSegments.some((occupied) => segmentsOverlap(segment, occupied)))) continue;
+      const crossings = segments.reduce((total, segment) => (
+        total + occupiedSegments.filter((occupied) => segmentsCross(segment, occupied)).length
+      ), 0);
+      const score = crossings * 72 * unit + Math.abs(candidateX - preferredLaneX);
+      if (score >= bestScore) continue;
+      laneX = candidateX;
+      bestScore = score;
+    }
     points = [
       start,
-      { x: startStubX, y: start.y },
-      { x: startStubX, y: startTrackY },
-      { x: laneX, y: startTrackY },
-      { x: laneX, y: endTrackY },
-      { x: endStubX, y: endTrackY },
-      { x: endStubX, y: end.y },
+      { x: laneX, y: start.y },
+      { x: laneX, y: end.y },
       end,
     ];
-    labelPoint = Math.abs(startTrackY - endTrackY) > 22 * unit
-      ? { x: laneX, y: (startTrackY + endTrackY) / 2 }
-      : { x: (start.x + end.x) / 2, y: startTrackY };
+    labelPoint = Math.abs(start.y - end.y) > 22 * unit
+      ? { x: laneX, y: (start.y + end.y) / 2 }
+      : { x: (start.x + end.x) / 2, y: start.y };
   } else if (route.kind === "backward") {
     const start = portPoint(source, startPort);
     const end = portPoint(target, endPort);
@@ -770,12 +787,12 @@ function escapeXml(value) {
 }
 
 function labelWidth(label, scale = 1) {
-  return Math.max(38, label.length * 7.1 + 16) * scale;
+  return Math.max(38, label.length * 7.8 + 16) * scale;
 }
 
 function nodeLabelLines(name, nodeWidth = BASE_NODE_WIDTH) {
   const words = name.trim().split(/\s+/);
-  if (words.length < 2 || name.length * 7.2 <= nodeWidth - 24) return [name];
+  if (words.length < 2 || name.length * 7.6 <= nodeWidth - 24) return [name];
   let best = null;
   for (let index = 1; index < words.length; index += 1) {
     const lines = [words.slice(0, index).join(" "), words.slice(index).join(" ")];
@@ -796,7 +813,7 @@ export function renderSvg(graph, layout) {
     return `<g class="edge">
       <path d="${path}" />
       <polygon points="${arrow}" />
-      <rect x="${edge.labelPoint.x - width / 2}" y="${edge.labelPoint.y - 11 * scale}" width="${width}" height="${22 * scale}" />
+      <rect x="${edge.labelPoint.x - width / 2}" y="${edge.labelPoint.y - 12 * scale}" width="${width}" height="${24 * scale}" />
       <text x="${edge.labelPoint.x}" y="${edge.labelPoint.y + 4 * scale}">${escapeXml(edge.label)}</text>
     </g>`;
   }).join("\n");
@@ -804,7 +821,7 @@ export function renderSvg(graph, layout) {
   const nodes = [...layout.nodes.values()].map((node) => {
     const lines = nodeLabelLines(node.name, node.width / scale);
     const longest = Math.max(...lines.map((line) => line.length));
-    const fontSize = Math.max(10 * scale, Math.min(14 * scale, (node.width - 24 * scale) / (longest * 0.58)));
+    const fontSize = Math.max(13 * scale, Math.min(14 * scale, (node.width - 24 * scale) / (longest * 0.58)));
     const centerX = node.x + node.width / 2;
     const firstY = node.y + node.height / 2 + 5 * scale - (lines.length - 1) * 8 * scale;
     const text = lines.map((line, index) => `<tspan x="${centerX}"${index ? ` dy="${17 * scale}"` : ""}>${escapeXml(line)}</tspan>`).join("");
@@ -819,7 +836,7 @@ export function renderSvg(graph, layout) {
       .edge path { fill: none; stroke: #111; stroke-width: ${1.6 * scale}; stroke-linecap: square; stroke-linejoin: round; }
       .edge polygon { fill: #111; }
       .edge rect { fill: #fff; }
-      .edge text { fill: #111; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: ${12 * scale}px; text-anchor: middle; }
+      .edge text { fill: #111; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: ${13 * scale}px; text-anchor: middle; }
       .node rect { fill: #fff; stroke: #111; stroke-width: ${2 * scale}; }
       .node text { fill: #111; font-family: Inter, Arial, sans-serif; font-size: ${14 * scale}px; font-weight: 600; text-anchor: middle; }
     </style>

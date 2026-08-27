@@ -14,6 +14,24 @@ const browser = await chromium.launch({
   ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}),
 });
 
+async function visibleTextBelowFloor(page, floor = 13) {
+  return page.evaluate((minimum) => [...document.querySelectorAll("body *")]
+    .filter((element) => {
+      if (["SCRIPT", "STYLE", "TEMPLATE"].includes(element.tagName)) return false;
+      const style = getComputedStyle(element);
+      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
+      if (!element.getClientRects().length) return false;
+      return [...element.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
+    })
+    .map((element) => ({
+      tag: element.tagName,
+      className: typeof element.className === "string" ? element.className : element.getAttribute("class") ?? "",
+      text: element.textContent.trim().replace(/\s+/g, " ").slice(0, 80),
+      size: Number.parseFloat(getComputedStyle(element).fontSize),
+    }))
+    .filter((entry) => entry.size < minimum - 0.01), floor);
+}
+
 try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true });
   const page = await context.newPage();
@@ -168,6 +186,7 @@ try {
   await page.waitForTimeout(200);
   await page.screenshot({ path: join(artifacts.pathname, "desktop.png") });
   await page.locator('[data-graph-action="open-layout"]').click();
+  assert.deepEqual(await visibleTextBelowFloor(page), []);
   await page.screenshot({ path: join(artifacts.pathname, "layout-window-desktop.png") });
   await page.locator('[data-window="layout"] [data-window-action="close"]').click();
   assert.deepEqual(errors, []);
@@ -187,6 +206,7 @@ try {
   assert.equal(await mobile.locator('[data-window="layout"]').isVisible(), true);
   assert.equal(await mobile.locator('[data-window="layout"]').evaluate((node) => node.getBoundingClientRect().right <= document.querySelector("#desktop").getBoundingClientRect().right + 1), true);
   assert.equal(await mobile.locator(".layout-controls").evaluate((controls) => controls.scrollWidth <= controls.clientWidth), true);
+  assert.deepEqual(await visibleTextBelowFloor(mobile), []);
   await mobile.screenshot({ path: join(artifacts.pathname, "layout-window-mobile.png") });
   await mobileContext.close();
 

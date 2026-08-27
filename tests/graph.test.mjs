@@ -70,6 +70,20 @@ function routeLength(edge) {
   }, 0);
 }
 
+function bendCount(edge) {
+  let previousAxis = null;
+  let bends = 0;
+  for (let index = 1; index < edge.points.length; index += 1) {
+    const start = edge.points[index - 1];
+    const end = edge.points[index];
+    if (start.x === end.x && start.y === end.y) continue;
+    const axis = start.y === end.y ? "horizontal" : "vertical";
+    if (previousAxis && previousAxis !== axis) bends += 1;
+    previousAxis = axis;
+  }
+  return bends;
+}
+
 test("Rubylith routes stay clear, compact, and distinct", async () => {
   const source = await readFile(new URL("../benchmarks/rubylith-bill-of-materials.boxline", import.meta.url), "utf8");
   const graph = parseGraph(source);
@@ -83,6 +97,10 @@ test("Rubylith routes stay clear, compact, and distinct", async () => {
     return routeLength(edge) / Math.max(1, direct);
   }));
   assert.ok(worstDetour <= 1.55, `worst route detour was ${worstDetour.toFixed(3)}×`);
+
+  const compactRoutes = layout.edges.filter((edge) => bendCount(edge) <= 2);
+  assert.ok(compactRoutes.length > layout.edges.length * 0.7, "most routes should turn at most twice");
+  assert.ok(layout.edges.every((edge) => bendCount(edge) <= 4), "no route should turn more than four times");
 
   for (const edge of layout.edges) {
     const previous = edge.points.at(-2);
