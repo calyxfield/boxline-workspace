@@ -398,7 +398,37 @@ button { border-radius: 0; }
   line-height: 1.35;
   letter-spacing: .03em;
 }
-.sheet-frame { min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; background: white; }
+.sheet-frame { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: white; }
+.graph-column-strip {
+  position: relative;
+  min-width: 0;
+  height: 34px;
+  overflow: hidden;
+  border-bottom: 1px solid #111;
+  background: #e7e6de;
+}
+.graph-column-strip[hidden] { display: none; }
+.graph-column-strip-track { position: absolute; top: 0; bottom: 0; left: 0; will-change: transform; }
+.graph-column-strip-band { position: absolute; top: 0; bottom: 0; border-right: 1px solid rgb(17 17 17 / 18%); }
+.graph-column-strip-label {
+  position: absolute;
+  top: 5px;
+  height: 24px;
+  min-width: 62px;
+  padding: 5px 8px 4px;
+  transform: translateX(-50%);
+  color: #111;
+  border: 1px solid rgb(17 17 17 / 42%);
+  border-bottom-width: 3px;
+  background: rgb(255 255 255 / 82%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--font-floor);
+  font-weight: 900;
+  line-height: 12px;
+  letter-spacing: .08em;
+  text-align: center;
+  white-space: nowrap;
+}
 .graph-preview {
   min-width: 0;
   min-height: 0;
@@ -410,6 +440,7 @@ button { border-radius: 0; }
   background-size: 20px 20px;
 }
 .graph-preview svg { display: block; max-width: none; margin: 0; background: white; box-shadow: 0 0 0 1px #b5b5b0; }
+.graph-preview svg .column-header { display: none; }
 .graph-preview.empty { display: grid; place-items: center; color: #727d7a; }
 .empty-message { padding: 16px; border: 1px solid #aaa; background: white; font-size: var(--font-floor); }
 .sheet-meta { display: flex; justify-content: space-between; gap: 12px; padding: 7px 9px; color: #64645f; border-top: 1px solid #111; font-size: var(--font-floor); font-weight: 800; letter-spacing: .06em; }

@@ -65,10 +65,20 @@ try {
   await page.locator("[data-graph-type]").selectOption("classified");
   assert.match(await page.evaluate(() => window.boxlineEditor.getSource()), /^graph classified\ncolumns class-a class-b/);
   assert.equal(await page.locator("[data-graph-preview] .column-header").count(), 3);
+  assert.equal(await page.locator("[data-graph-preview] .column-band").count(), 3);
+  assert.equal(await page.locator("[data-graph-column-strip]").isVisible(), true);
+  assert.equal(await page.locator("[data-graph-column-strip] .graph-column-strip-label").count(), 3);
+  const headerPosition = await page.evaluate(() => {
+    const strip = document.querySelector("[data-graph-column-strip]").getBoundingClientRect();
+    const preview = document.querySelector("[data-graph-preview]").getBoundingClientRect();
+    return { stripBottom: strip.bottom, previewTop: preview.top };
+  });
+  assert.ok(headerPosition.stripBottom <= headerPosition.previewTop + 0.5);
   assert.match(await page.locator("[data-graph-layout-mode]").textContent(), /^CLASSIFIED · \d+ SWAPS? · \d+ (?:PASS|PASSES)$/);
   assert.equal((await page.evaluate(() => window.__boxlineWorkspace.getState().compiled)).type, "classified");
   await page.locator("[data-graph-type]").selectOption("optimized");
   assert.doesNotMatch(await page.evaluate(() => window.boxlineEditor.getSource()), /^columns /m);
+  assert.equal(await page.locator("[data-graph-column-strip]").isVisible(), false);
 
   const zoomWidthBefore = await page.locator("[data-graph-preview] svg").evaluate((svg) => svg.getBoundingClientRect().width);
   await page.locator('[data-graph-action="zoom-in"]').click();
@@ -170,6 +180,20 @@ try {
   assert.equal(await page.locator("[data-graph-status]").textContent(), "31 STATES · 35 ARROWS");
   assert.equal(await page.locator("[data-graph-type]").inputValue(), "classified");
   assert.ok(await page.locator("[data-graph-preview] .column-header").count() >= 2);
+  assert.ok(await page.locator("[data-graph-preview] .column-band").count() >= 2);
+  assert.equal(await page.locator("[data-graph-column-strip]").isVisible(), true);
+  const headerScroll = await page.evaluate(() => {
+    const preview = document.querySelector("[data-graph-preview]");
+    const label = document.querySelector("[data-graph-column-strip] .graph-column-strip-label");
+    preview.scrollLeft = 0;
+    preview.dispatchEvent(new Event("scroll"));
+    const before = label.getBoundingClientRect().left;
+    preview.scrollLeft = 120;
+    preview.dispatchEvent(new Event("scroll"));
+    return { delta: before - label.getBoundingClientRect().left, scrollLeft: preview.scrollLeft };
+  });
+  assert.ok(headerScroll.scrollLeft > 0);
+  assert.ok(Math.abs(headerScroll.delta - headerScroll.scrollLeft) < 1);
   await page.locator('[data-files-action="new-diagram"]').click();
   await page.locator("[data-file-name]").fill("DEPENDENCY TEST");
   await page.locator("[data-file-create]").evaluate((form) => form.requestSubmit());

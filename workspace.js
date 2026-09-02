@@ -755,6 +755,7 @@ function setupGraph(element) {
     const factor = Math.exp(-event.deltaY * 0.0015);
     setGraphZoom(graphZoom() * factor, { clientX: event.clientX, clientY: event.clientY });
   }, { passive: false });
+  preview.addEventListener("scroll", () => syncGraphColumnStrip(element), { passive: true });
   element.querySelector('[data-graph-action="export-pdf"]').addEventListener("click", downloadPdf);
   element.querySelector('[data-graph-action="export-png"]').addEventListener("click", () => {
     downloadPng().catch((error) => {
@@ -800,15 +801,69 @@ function updateGraphZoomControls(element = appWindow("graph")) {
   readout.disabled = !ready;
 }
 
+function syncGraphColumnStrip(element = appWindow("graph")) {
+  if (!element) return;
+  const preview = element.querySelector("[data-graph-preview]");
+  const track = element.querySelector("[data-graph-column-strip-track]");
+  if (!preview || !track) return;
+  const inset = parseFloat(getComputedStyle(preview).paddingLeft) || 0;
+  track.style.transform = `translateX(${inset - preview.scrollLeft}px)`;
+}
+
+function renderGraphColumnStrip(element = appWindow("graph")) {
+  if (!element) return;
+  const strip = element.querySelector("[data-graph-column-strip]");
+  const track = element.querySelector("[data-graph-column-strip-track]");
+  if (!strip || !track) return;
+  const headers = compiled?.layout.columnHeaders || [];
+  const bands = compiled?.layout.columnBands || [];
+  if (!headers.length || !compiled?.graph.nodes.length) {
+    strip.hidden = true;
+    track.replaceChildren();
+    return;
+  }
+
+  const zoom = graphZoom();
+  track.replaceChildren();
+  track.style.width = `${compiled.layout.width * zoom}px`;
+  for (const band of bands) {
+    const block = document.createElement("span");
+    block.className = "graph-column-strip-band";
+    block.dataset.class = band.className;
+    Object.assign(block.style, {
+      left: `${band.x * zoom}px`,
+      width: `${band.width * zoom}px`,
+      backgroundColor: band.color,
+    });
+    track.append(block);
+  }
+  for (const header of headers) {
+    const label = document.createElement("span");
+    label.className = "graph-column-strip-label";
+    label.dataset.class = header.className;
+    label.textContent = header.className.toUpperCase();
+    Object.assign(label.style, {
+      left: `${(header.x + header.width / 2) * zoom}px`,
+      borderBottomColor: header.header,
+      color: header.ink,
+    });
+    track.append(label);
+  }
+  strip.hidden = false;
+  syncGraphColumnStrip(element);
+}
+
 function applyGraphScale(element = appWindow("graph")) {
   const svg = element?.querySelector("[data-graph-preview] svg");
   if (!svg || !compiled) {
+    renderGraphColumnStrip(element);
     updateGraphZoomControls(element);
     return;
   }
   const zoom = graphZoom();
   svg.style.width = `${compiled.layout.width * zoom}px`;
   svg.style.height = `${compiled.layout.height * zoom}px`;
+  renderGraphColumnStrip(element);
   updateGraphZoomControls(element);
 }
 

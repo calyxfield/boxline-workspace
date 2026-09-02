@@ -165,6 +165,9 @@ state METAL [cargo]:`);
   assert.ok(x("ORE") < x("Mill"));
   assert.ok(x("Mill") < x("METAL"));
   assert.deepEqual(layout.columnHeaders.map((header) => header.className), ["industry", "cargo", "industry", "cargo"]);
+  assert.deepEqual(layout.columnBands.map((band) => band.className), ["industry", "cargo", "industry", "cargo"]);
+  assert.equal(new Set(layout.columnBands.map((band) => band.color)).size, 2);
+  assert.ok(layout.columnBands.every((band) => band.y >= layout.columnHeaders[0].y + layout.columnHeaders[0].height));
   assert.ok(layout.optimization);
 });
 

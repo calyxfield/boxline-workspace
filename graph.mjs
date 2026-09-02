@@ -6,6 +6,14 @@ const BASE_MARGIN = 64;
 const BASE_FORWARD_LANE_SPACING = 16;
 const BASE_PARALLEL_SPACING = 14;
 
+const CLASS_COLUMN_PALETTE = Object.freeze([
+  Object.freeze({ band: "#f6eddb", header: "#d7a84f", ink: "#5d4519" }),
+  Object.freeze({ band: "#e3eef1", header: "#79a4b0", ink: "#234d5d" }),
+  Object.freeze({ band: "#e8eddc", header: "#8fa85e", ink: "#3e5120" }),
+  Object.freeze({ band: "#eee4ed", header: "#a77ba0", ink: "#593452" }),
+  Object.freeze({ band: "#eee8dc", header: "#ab9065", ink: "#594522" }),
+]);
+
 export const DEFAULT_LAYOUT_OPTIONS = Object.freeze({
   size: 1,
   shape: 0,
@@ -289,6 +297,7 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
       options: geometry.options,
       optimization: null,
       columnHeaders: [],
+      columnBands: [],
     };
   }
 
@@ -320,7 +329,7 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
     ? geometry.buffer + (22 + (backwardCount - 1) * 26) * geometry.scale
     : 0;
   const bottomRouteBand = longForwardCount ? (34 + (longForwardCount - 1) * 26) * geometry.scale : 0;
-  const headerBand = graph.type === "classified" && graph.classes?.length ? 42 * geometry.scale : 0;
+  const headerBand = graph.type === "classified" && graph.classes?.length ? 54 * geometry.scale : 0;
   const contentDrawingHeight = Math.max(420 * geometry.scale * geometry.verticalShape, contentHeight + (2 * geometry.margin));
   const drawingHeight = contentDrawingHeight + headerBand;
   const height = drawingHeight + topRouteBand + bottomRouteBand;
@@ -366,17 +375,38 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
     });
   });
 
-  const columnHeaders = graph.type === "classified" && graph.classes?.length
-    ? columnX.map((x, index) => ({
-      className: graph.classes[index % graph.classes.length],
-      x,
-      y: topRouteBand + 8 * geometry.scale,
-      width: geometry.nodeWidth,
-      height: 24 * geometry.scale,
-    }))
-    : [];
-
   const width = Math.max(720 * geometry.scale * geometry.horizontalShape, columnX[maximumLayer] + geometry.nodeWidth + geometry.margin);
+  const columnHeaders = graph.type === "classified" && graph.classes?.length
+    ? columnX.map((x, index) => {
+      const classIndex = index % graph.classes.length;
+      return {
+        className: graph.classes[classIndex],
+        classIndex,
+        x,
+        y: topRouteBand + 10 * geometry.scale,
+        width: geometry.nodeWidth,
+        height: 30 * geometry.scale,
+        ...CLASS_COLUMN_PALETTE[classIndex % CLASS_COLUMN_PALETTE.length],
+      };
+    })
+    : [];
+  const columnBands = columnHeaders.map((header, index) => {
+    const previousEnd = index ? columnX[index - 1] + geometry.nodeWidth : 0;
+    const nextStart = index < columnX.length - 1 ? columnX[index + 1] : width;
+    const left = index ? (previousEnd + columnX[index]) / 2 : 0;
+    const right = index < columnX.length - 1
+      ? (columnX[index] + geometry.nodeWidth + nextStart) / 2
+      : width;
+    return {
+      className: header.className,
+      classIndex: header.classIndex,
+      x: left,
+      y: topRouteBand + headerBand,
+      width: right - left,
+      height: contentDrawingHeight,
+      color: header.band,
+    };
+  });
   const parallelCount = new Map();
   const ports = assignPorts(graph.edges, positions, layer, geometry);
   const backwardLanes = new Map(
@@ -497,6 +527,7 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
     options: geometry.options,
     optimization,
     columnHeaders,
+    columnBands,
   };
 }
 
@@ -1107,12 +1138,14 @@ function nodeLabelLines(name, nodeWidth = BASE_NODE_WIDTH) {
 
 export function renderSvg(graph, layout) {
   const scale = layout.scale || 1;
+  const bands = (layout.columnBands || []).map((band) => `<rect class="column-band" data-class="${escapeXml(band.className)}" x="${band.x}" y="${band.y}" width="${band.width}" height="${band.height}" fill="${band.color}" />`).join("\n");
   const headers = (layout.columnHeaders || []).map((header) => {
     const centerX = header.x + header.width / 2;
     const bottom = header.y + header.height;
-    return `<g class="column-header">
-      <text x="${centerX}" y="${header.y + 15 * scale}">${escapeXml(header.className.toUpperCase())}</text>
-      <line x1="${header.x}" y1="${bottom}" x2="${header.x + header.width}" y2="${bottom}" />
+    return `<g class="column-header" data-class="${escapeXml(header.className)}">
+      <rect x="${header.x}" y="${header.y}" width="${header.width}" height="${header.height}" fill="${header.header}" />
+      <text x="${centerX}" y="${header.y + 20 * scale}">${escapeXml(header.className.toUpperCase())}</text>
+      <line x1="${header.x}" y1="${bottom}" x2="${header.x + header.width}" y2="${bottom}" stroke="${header.ink}" />
     </g>`;
   }).join("\n");
   const edges = layout.edges.map((edge) => {
@@ -1148,12 +1181,13 @@ export function renderSvg(graph, layout) {
       .edge polygon { fill: #111; }
       .edge rect { fill: #fff; }
       .edge text { fill: #111; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: ${13 * scale}px; text-anchor: middle; }
-      .column-header text { fill: #454541; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: ${11 * scale}px; font-weight: 700; letter-spacing: ${1.2 * scale}px; text-anchor: middle; }
-      .column-header line { stroke: #aaa9a2; stroke-width: ${1 * scale}; }
+      .column-header text { fill: #111; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: ${12 * scale}px; font-weight: 800; letter-spacing: ${1.2 * scale}px; text-anchor: middle; }
+      .column-header line { stroke-width: ${1 * scale}; }
       .node rect { fill: #fff; stroke: #111; stroke-width: ${2 * scale}; }
       .node text { fill: #111; font-family: Inter, Arial, sans-serif; font-size: ${14 * scale}px; font-weight: 600; text-anchor: middle; }
     </style>
     <rect width="100%" height="100%" fill="#fff" />
+    ${bands}
     ${headers}
     ${edges}
     ${nodes}
@@ -1202,13 +1236,27 @@ export function buildPdf(graph, layout) {
   });
   const commands = ["1 J", "1 j", "0 0 0 RG", "0 0 0 rg"];
 
+  const pdfColor = (hex) => {
+    const channels = hex.match(/[0-9a-f]{2}/gi).map((channel) => parseInt(channel, 16) / 255);
+    return channels.map((channel) => channel.toFixed(3)).join(" ");
+  };
+
+  for (const band of layout.columnBands || []) {
+    const topLeft = point({ x: band.x, y: band.y });
+    const bottomRight = point({ x: band.x + band.width, y: band.y + band.height });
+    commands.push(`${pdfColor(band.color)} rg ${topLeft.x.toFixed(3)} ${bottomRight.y.toFixed(3)} ${(band.width * scale).toFixed(3)} ${(band.height * scale).toFixed(3)} re f`);
+  }
+
   for (const header of layout.columnHeaders || []) {
+    const topLeft = point({ x: header.x, y: header.y });
+    const bottomRight = point({ x: header.x + header.width, y: header.y + header.height });
     const start = point({ x: header.x, y: header.y + header.height });
     const end = point({ x: header.x + header.width, y: header.y + header.height });
     const center = point({ x: header.x + header.width / 2, y: header.y + header.height / 2 });
     const label = header.className.toUpperCase();
     const fontSize = Math.max(7, Math.min(9, 10 * scale));
-    commands.push("0.65 0.65 0.62 RG");
+    commands.push(`${pdfColor(header.header)} rg ${topLeft.x.toFixed(3)} ${bottomRight.y.toFixed(3)} ${(header.width * scale).toFixed(3)} ${(header.height * scale).toFixed(3)} re f`);
+    commands.push(`${pdfColor(header.ink)} RG`);
     commands.push(`${Math.max(0.6, scale).toFixed(3)} w ${start.x.toFixed(3)} ${start.y.toFixed(3)} m ${end.x.toFixed(3)} ${end.y.toFixed(3)} l S`);
     commands.push("0.27 0.27 0.25 rg");
     commands.push(`BT /F2 ${fontSize.toFixed(3)} Tf ${(center.x - label.length * fontSize * 0.29).toFixed(3)} ${(center.y - fontSize * 0.34).toFixed(3)} Td (${pdfEscape(label)}) Tj ET`);
