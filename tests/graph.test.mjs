@@ -146,6 +146,22 @@ test("optimized layout iteratively removes a crossing and is deterministic", () 
   assert.deepEqual(optimized.edges, repeated.edges);
 });
 
+test("FIRS 4 cargo examples import as optimized graphs", async () => {
+  for (const [name, expectedNodes, expectedEdges] of [
+    ["firs-4-temperate.boxline", 31, 35],
+    ["firs-4-steeltown.boxline", 72, 100],
+  ]) {
+    const source = await readFile(new URL(`../examples/${name}`, import.meta.url), "utf8");
+    const graph = parseGraph(source);
+    assert.equal(graph.errors.length, 0);
+    assert.equal(graph.type, "optimized");
+    assert.equal(graph.nodes.length, expectedNodes);
+    assert.equal(graph.edges.length, expectedEdges);
+    const layout = layoutGraph(graph);
+    assert.ok(layout.optimization.after.crossings <= layout.optimization.before.crossings);
+  }
+});
+
 test("Rubylith routes stay clear, compact, and distinct", async () => {
   const source = await readFile(new URL("../benchmarks/rubylith-bill-of-materials.boxline", import.meta.url), "utf8");
   const graph = parseGraph(source);

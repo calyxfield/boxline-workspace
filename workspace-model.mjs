@@ -23,7 +23,7 @@ function makeId(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${serial.toString(36)}`;
 }
 
-export function createDefaultFiles(exampleSource, rubylithSource = "") {
+export function createDefaultFiles(exampleSource, rubylithSource = "", bundledExamples = []) {
   return {
     id: "root",
     type: "folder",
@@ -46,10 +46,33 @@ export function createDefaultFiles(exampleSource, rubylithSource = "") {
             name: "RUBYLITH BILL OF MATERIALS.boxline",
             content: rubylithSource,
           }] : []),
+          ...bundledExamples.map((example) => ({
+            id: String(example.id),
+            type: "file",
+            name: String(example.name),
+            content: String(example.content),
+          })),
         ],
       },
     ],
   };
+}
+
+export function addMissingBundledExamples(root, bundledExamples) {
+  const folder = findNode(root, "folder-examples");
+  if (!folder || folder.type !== "folder") return 0;
+  let added = 0;
+  for (const candidate of bundledExamples) {
+    if (findNode(root, candidate.id)) continue;
+    folder.children.push({
+      id: String(candidate.id),
+      type: "file",
+      name: String(candidate.name),
+      content: String(candidate.content),
+    });
+    added += 1;
+  }
+  return added;
 }
 
 export function normalizeFiles(root, fallback) {

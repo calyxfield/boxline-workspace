@@ -11,6 +11,7 @@ import {
 } from "./graph.mjs";
 import { createSourceEditor } from "./vendor/codemirror.js";
 import {
+  addMissingBundledExamples,
   clampGraphZoom,
   createDefaultFiles,
   createDiagram,
@@ -80,10 +81,18 @@ const APPS = Object.freeze({
   }),
 });
 
-const rubylithSource = await fetch("./benchmarks/rubylith-bill-of-materials.boxline")
-  .then((response) => response.ok ? response.text() : "")
-  .catch(() => "");
-const defaultFiles = createDefaultFiles(EXAMPLE_SOURCE, rubylithSource);
+const bundledSources = await Promise.all([
+  ["file-rubylith", "RUBYLITH BILL OF MATERIALS.boxline", "./benchmarks/rubylith-bill-of-materials.boxline"],
+  ["file-firs-temperate", "FIRS 4 TEMPERATE.boxline", "./examples/firs-4-temperate.boxline"],
+  ["file-firs-steeltown", "FIRS 4 STEELTOWN.boxline", "./examples/firs-4-steeltown.boxline"],
+].map(async ([id, name, url]) => {
+  const content = await fetch(url)
+    .then((response) => response.ok ? response.text() : "")
+    .catch(() => "");
+  return { id, name, content };
+}));
+const [rubylith, ...firsExamples] = bundledSources;
+const defaultFiles = createDefaultFiles(EXAMPLE_SOURCE, rubylith.content, firsExamples.filter((file) => file.content));
 
 let model = {
   files: defaultFiles,
@@ -207,7 +216,7 @@ function saveNow(announce = false) {
   window.clearTimeout(saveTimer);
   saveTimer = 0;
   const payload = {
-    version: 2,
+    version: 3,
     savedAt: new Date().toISOString(),
     model,
     activeWindowId,
@@ -255,6 +264,7 @@ function restore() {
     };
     migrateGraphSources(model.files);
   }
+  if (Number(payload.version) < 3) addMissingBundledExamples(model.files, firsExamples.filter((file) => file.content));
   validActiveFile();
   if (findNode(model.files, model.currentFolderId)?.type !== "folder") model.currentFolderId = "root";
   windows = normalizeWindowState(payload.windows);

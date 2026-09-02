@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  addMissingBundledExamples,
   clampGraphZoom,
   createDefaultFiles,
   createDiagram,
@@ -14,11 +15,28 @@ import {
 } from "../workspace-model.mjs";
 
 test("default workspace contains editable Boxline examples", () => {
-  const root = createDefaultFiles("state Pump:", "state Rubylith:");
+  const root = createDefaultFiles("state Pump:", "state Rubylith:", [{
+    id: "file-firs-temperate",
+    name: "FIRS 4 TEMPERATE.boxline",
+    content: "state FIRS:",
+  }]);
   assert.equal(root.type, "folder");
   assert.equal(findNode(root, "file-pump").content, "state Pump:");
   assert.equal(findNode(root, "file-rubylith").content, "state Rubylith:");
+  assert.equal(findNode(root, "file-firs-temperate").content, "state FIRS:");
   assert.deepEqual(folderTrail(root, "folder-examples").map((node) => node.id), ["root", "folder-examples"]);
+});
+
+test("new bundled examples are added once to an existing workspace", () => {
+  const existing = createDefaultFiles("state Pump:");
+  const examples = [{
+    id: "file-firs-temperate",
+    name: "FIRS 4 TEMPERATE.boxline",
+    content: "state FIRS:",
+  }];
+  assert.equal(addMissingBundledExamples(existing, examples), 1);
+  assert.equal(findNode(existing, "file-firs-temperate").content, "state FIRS:");
+  assert.equal(addMissingBundledExamples(existing, examples), 0);
 });
 
 test("folders and diagrams are created with collision-free names", () => {

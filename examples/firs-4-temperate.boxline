@@ -1,0 +1,104 @@
+graph optimized
+
+# FIRS 4 Temperate cargo flow
+# Imported from the official FIRS 4.15.1 economy graph.
+# Source: https://grf.farm/firs/4.15.1/html/temperate_basic.dot
+# Industry names use title case. Cargo names use capitals.
+# "makes" points to a cargo; "used by" points to its recipient.
+
+state Cider Mill:
+  makes -> ALCOHOL
+
+state Clay Pit:
+  makes -> CHINA CLAY
+
+state Coal Mine:
+  makes -> COAL
+
+state Dairy:
+  makes -> FOOD
+
+state Dairy Farm:
+  makes -> LIVESTOCK
+  makes -> MILK
+
+state Dredging Site:
+  makes -> SAND
+
+state Fishing Grounds:
+  makes -> FISH
+
+state Fishing Harbour:
+  makes -> FOOD
+
+state Glass Works:
+  makes -> GOODS
+
+state Iron Ore Mine:
+  makes -> IRON ORE
+
+state Metal Workshop:
+  makes -> GOODS
+
+state Orchard and Piggery:
+  makes -> FRUIT
+  makes -> LIVESTOCK
+
+state Port:
+  makes -> CHEMICALS
+
+state Scrap Yard:
+  makes -> SCRAP METAL
+
+state Steel Mill:
+  makes -> STEEL
+
+state Stockyard:
+  makes -> FOOD
+
+state Towns:
+
+state ALCOHOL:
+  used by -> Towns
+
+state CHEMICALS:
+  used by -> Glass Works
+  used by -> Metal Workshop
+
+state CHINA CLAY:
+  used by -> Port
+
+state COAL:
+  used by -> Steel Mill
+
+state FISH:
+  used by -> Fishing Harbour
+
+state FOOD:
+  used by -> Port
+  used by -> Towns
+
+state FRUIT:
+  used by -> Cider Mill
+
+state GOODS:
+  used by -> Port
+  used by -> Towns
+
+state IRON ORE:
+  used by -> Steel Mill
+
+state LIVESTOCK:
+  used by -> Stockyard
+
+state MILK:
+  used by -> Dairy
+
+state SAND:
+  used by -> Glass Works
+
+state SCRAP METAL:
+  used by -> Steel Mill
+
+state STEEL:
+  used by -> Metal Workshop

@@ -154,6 +154,13 @@ try {
 
   await page.locator('.launch-button[data-app="files"]').click();
   assert.equal(await page.locator('[data-window="files"]').isVisible(), true);
+  await page.locator('.file-item[data-node-id="folder-examples"]').dblclick();
+  assert.equal(await page.locator('.file-item[data-node-id="file-firs-temperate"]').count(), 1);
+  assert.equal(await page.locator('.file-item[data-node-id="file-firs-steeltown"]').count(), 1);
+  await page.locator('.file-item[data-node-id="file-firs-temperate"]').dblclick();
+  assert.match(await page.locator('[data-window="editor"] .window-title').textContent(), /FIRS 4 TEMPERATE\.boxline/);
+  assert.equal(await page.locator("[data-graph-status]").textContent(), "31 STATES · 35 ARROWS");
+  assert.equal(await page.locator("[data-graph-type]").inputValue(), "optimized");
   await page.locator('[data-files-action="new-diagram"]').click();
   await page.locator("[data-file-name]").fill("DEPENDENCY TEST");
   await page.locator("[data-file-create]").evaluate((form) => form.requestSubmit());

@@ -1,0 +1,251 @@
+graph optimized
+
+# FIRS 4 Steeltown cargo flow
+# Imported from the official FIRS 4.15.1 economy graph.
+# Source: https://grf.farm/firs/4.15.1/html/steeltown.dot
+# Industry names use title case. Cargo names use capitals.
+# "makes" points to a cargo; "used by" points to its recipient.
+
+state Assembly Plant:
+  makes -> VEHICLES
+
+state Basic Oxygen Furnace:
+  makes -> ALLOY STEEL
+  makes -> CARBON STEEL
+  makes -> SLAG
+
+state Blast Furnace:
+  makes -> CAST IRON
+  makes -> PIG IRON
+  makes -> SLAG
+
+state Body Plant:
+  makes -> VEHICLE BODIES
+
+state Bulk Terminal:
+  makes -> ALUMINIUM
+  makes -> FERROCHROME
+  makes -> MANGANESE
+  makes -> PLASTICS
+  makes -> RUBBER
+
+state Carbon Black Plant:
+  makes -> CARBON BLACK
+
+state Chlor-alkali Plant:
+  makes -> ACID
+  makes -> CHLORINE
+  makes -> SODIUM HYDROXIDE
+
+state Coal Mine:
+  makes -> COAL
+
+state Coke Oven:
+  makes -> COAL TAR
+  makes -> COKE
+  makes -> SULPHUR
+
+state Component Factory:
+  makes -> VEHICLE PARTS
+
+state Cryo Plant:
+  makes -> OXYGEN
+
+state Electric Arc Furnace:
+  makes -> CARBON STEEL
+  makes -> SLAG
+  makes -> STAINLESS STEEL
+
+state Engine Plant:
+  makes -> VEHICLE ENGINES
+
+state Farm:
+  makes -> FOOD
+
+state Glass Works:
+  makes -> GLASS
+
+state Iron Ore Mine:
+  makes -> IRON ORE
+
+state Lime Kiln:
+  makes -> QUICKLIME
+
+state Limestone Mine:
+  makes -> LIMESTONE
+
+state Potash Mine:
+  makes -> POTASH
+  makes -> SALT
+
+state Quarry:
+  makes -> LIMESTONE
+  makes -> SAND
+
+state Scrap Yard:
+  makes -> SCRAP METAL
+
+state Sheet and Pipe Mill:
+  makes -> PIPE
+  makes -> STEEL SHEET
+
+state Slag Grinding Plant:
+  makes -> CEMENT
+
+state Soda Ash Mine:
+  makes -> SALT
+  makes -> SODA ASH
+
+state Towns:
+
+state Tyre Plant:
+  makes -> TYRES
+
+state Wharf:
+  makes -> CLEANING AGENTS
+  makes -> ELECTRICAL PARTS
+  makes -> PAINTS & COATINGS
+  makes -> ZINC
+
+state Wire and Section Mill:
+  makes -> STEEL SECTIONS
+  makes -> STEEL WIRE ROD
+
+state ACID:
+  used by -> Sheet and Pipe Mill
+  used by -> Wire and Section Mill
+
+state ALLOY STEEL:
+  used by -> Component Factory
+
+state ALUMINIUM:
+  used by -> Engine Plant
+
+state CARBON BLACK:
+  used by -> Tyre Plant
+
+state CARBON STEEL:
+  used by -> Sheet and Pipe Mill
+  used by -> Wire and Section Mill
+
+state CAST IRON:
+  used by -> Engine Plant
+
+state CEMENT:
+  used by -> Wharf
+
+state CHLORINE:
+  used by -> Bulk Terminal
+
+state CLEANING AGENTS:
+  used by -> Wire and Section Mill
+
+state COAL:
+  used by -> Coke Oven
+
+state COAL TAR:
+  used by -> Carbon Black Plant
+
+state COKE:
+  used by -> Blast Furnace
+
+state ELECTRICAL PARTS:
+  used by -> Component Factory
+
+state FERROCHROME:
+  used by -> Electric Arc Furnace
+
+state FOOD:
+  used by -> Bulk Terminal
+  used by -> Towns
+
+state GLASS:
+  used by -> Body Plant
+
+state IRON ORE:
+  used by -> Blast Furnace
+
+state LIMESTONE:
+  used by -> Blast Furnace
+  used by -> Lime Kiln
+
+state MANGANESE:
+  used by -> Basic Oxygen Furnace
+
+state OXYGEN:
+  used by -> Basic Oxygen Furnace
+  used by -> Electric Arc Furnace
+
+state PAINTS & COATINGS:
+  used by -> Body Plant
+
+state PIG IRON:
+  used by -> Basic Oxygen Furnace
+
+state PIPE:
+  used by -> Wharf
+
+state PLASTICS:
+  used by -> Component Factory
+
+state POTASH:
+  used by -> Bulk Terminal
+
+state QUICKLIME:
+  used by -> Basic Oxygen Furnace
+  used by -> Electric Arc Furnace
+
+state RUBBER:
+  used by -> Tyre Plant
+
+state SALT:
+  used by -> Chlor-alkali Plant
+
+state SAND:
+  used by -> Engine Plant
+  used by -> Glass Works
+
+state SCRAP METAL:
+  used by -> Electric Arc Furnace
+
+state SLAG:
+  used by -> Slag Grinding Plant
+
+state SODA ASH:
+  used by -> Glass Works
+
+state SODIUM HYDROXIDE:
+  used by -> Wharf
+
+state STAINLESS STEEL:
+  used by -> Component Factory
+
+state STEEL SECTIONS:
+  used by -> Wharf
+
+state STEEL SHEET:
+  used by -> Body Plant
+
+state STEEL WIRE ROD:
+  used by -> Tyre Plant
+
+state SULPHUR:
+  used by -> Tyre Plant
+
+state TYRES:
+  used by -> Assembly Plant
+
+state VEHICLE BODIES:
+  used by -> Assembly Plant
+
+state VEHICLE ENGINES:
+  used by -> Assembly Plant
+
+state VEHICLE PARTS:
+  used by -> Assembly Plant
+
+state VEHICLES:
+  used by -> Towns
+
+state ZINC:
+  used by -> Sheet and Pipe Mill
