@@ -313,6 +313,27 @@ button { border-radius: 0; }
 .graph-status { padding-left: 8px; border-left: 5px solid var(--ink); font-size: var(--font-floor); font-weight: 900; letter-spacing: .05em; white-space: nowrap; }
 .graph-status[data-state="error"] { border-left-style: double; border-left-color: var(--red); }
 .graph-status[data-state="empty"] { color: #657276; border-left-color: #8b9693; }
+.graph-type-control {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #58676b;
+  font-size: var(--font-floor);
+  font-weight: 900;
+  letter-spacing: .05em;
+}
+.graph-type-control select {
+  min-height: 26px;
+  padding: 0 23px 0 7px;
+  color: #18262a;
+  border: 1px solid #526267;
+  border-radius: 0;
+  background: #eeeade;
+  font: inherit;
+  font-size: var(--font-floor);
+  cursor: pointer;
+}
+.graph-type-control select:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
 .zoom-controls { display: flex; align-items: center; gap: 0; }
 .zoom-controls .tool-button { min-width: 27px; padding: 0 7px; }
 .zoom-controls .tool-button + .tool-button { border-left: 0; }

@@ -54,6 +54,13 @@ try {
   assert.equal(await page.locator('[data-window="graph"]').isVisible(), true);
   assert.equal(await page.locator("[data-graph-status]").textContent(), "4 STATES · 6 ARROWS");
   assert.equal(await page.locator("[data-graph-preview] .node").count(), 4);
+  assert.equal(await page.locator("[data-graph-type]").inputValue(), "directed");
+  assert.match(await page.locator("[data-graph-layout-mode]").textContent(), /^DIRECTED LAYOUT/);
+
+  await page.locator("[data-graph-type]").selectOption("optimized");
+  assert.match(await page.evaluate(() => window.boxlineEditor.getSource()), /^graph optimized/);
+  assert.match(await page.locator("[data-graph-layout-mode]").textContent(), /^OPTIMIZED · \d+ SWAPS? · \d+ (?:PASS|PASSES)$/);
+  assert.equal((await page.evaluate(() => window.__boxlineWorkspace.getState().compiled)).type, "optimized");
 
   const zoomWidthBefore = await page.locator("[data-graph-preview] svg").evaluate((svg) => svg.getBoundingClientRect().width);
   await page.locator('[data-graph-action="zoom-in"]').click();
@@ -140,7 +147,7 @@ try {
   assert.deepEqual(intrinsicAfter, intrinsicBefore);
   assert.equal(await page.locator("[data-graph-preview]").evaluate((node) => node.scrollWidth > node.clientWidth), true);
 
-  const source = "state Input:\n  complete -> Output\nstate Output:";
+  const source = "graph optimized\n\nstate Input:\n  complete -> Output\nstate Output:";
   await page.evaluate((value) => window.boxlineEditor.setSource(value), source);
   assert.equal(await page.locator("[data-graph-status]").textContent(), "2 STATES · 1 ARROW");
   assert.equal(await page.locator("[data-graph-preview] .node").count(), 2);
@@ -154,6 +161,7 @@ try {
   assert.equal(await newFile.count(), 1);
   await newFile.dblclick();
   assert.match(await page.locator('[data-window="editor"] .window-title').textContent(), /DEPENDENCY TEST\.boxline/);
+  assert.match(await page.evaluate(() => window.boxlineEditor.getSource()), /^graph directed\n\nstate DEPENDENCY TEST:/);
   await page.evaluate((value) => window.boxlineEditor.setSource(value), source);
 
   await page.evaluate(() => window.__boxlineWorkspace.minimize("graph"));

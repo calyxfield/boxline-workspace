@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  GRAPH_TYPES,
   layoutGraph,
   normalizeLayoutOptions,
   parseGraph,
+  setGraphType,
 } from "../graph.mjs";
 
 function orthogonalSegments(layout) {
@@ -102,6 +104,48 @@ function bendCount(edge) {
   return bends;
 }
 
+test("graph type declaration is required and selects the layout engine", () => {
+  const missing = parseGraph("state Input:");
+  assert.equal(missing.type, null);
+  assert.match(missing.errors[0].message, /graph directed/);
+
+  const unsupported = parseGraph("graph radial\n\nstate Input:");
+  assert.equal(unsupported.type, "radial");
+  assert.match(unsupported.errors[0].message, /not supported/);
+
+  for (const type of GRAPH_TYPES) {
+    const graph = parseGraph(`graph ${type}\n\nstate Input:\n  next -> Output\nstate Output:`);
+    assert.equal(graph.type, type);
+    assert.equal(graph.errors.length, 0);
+    assert.equal(graph.nodes.length, 2);
+    assert.equal(graph.edges.length, 1);
+  }
+});
+
+test("graph type can be changed without touching the shared grammar", () => {
+  const directed = "graph directed\n\nstate Input:\n  next -> Output\nstate Output:";
+  const optimized = setGraphType(directed, "optimized");
+  assert.equal(optimized, directed.replace("graph directed", "graph optimized"));
+  assert.equal(parseGraph(optimized).type, "optimized");
+  assert.equal(setGraphType("state Input:", "directed"), "graph directed\n\nstate Input:");
+  assert.throws(() => setGraphType(directed, "radial"), /Unsupported graph type/);
+});
+
+test("optimized layout iteratively removes a crossing and is deterministic", () => {
+  const body = "state A:\n  to D -> D\nstate B:\n  to C -> C\nstate C:\nstate D:";
+  const directed = layoutGraph(parseGraph(`graph directed\n\n${body}`));
+  const optimized = layoutGraph(parseGraph(`graph optimized\n\n${body}`));
+  const repeated = layoutGraph(parseGraph(`graph optimized\n\n${body}`));
+
+  assert.equal(directed.optimization, null);
+  assert.deepEqual(optimized.optimization.before, { crossings: 1, distance: 2 });
+  assert.deepEqual(optimized.optimization.after, { crossings: 0, distance: 0 });
+  assert.equal(optimized.optimization.accepted, 1);
+  assert.ok(optimized.optimization.passes >= 2);
+  assert.deepEqual([...optimized.nodes.entries()], [...repeated.nodes.entries()]);
+  assert.deepEqual(optimized.edges, repeated.edges);
+});
+
 test("Rubylith routes stay clear, compact, and distinct", async () => {
   const source = await readFile(new URL("../benchmarks/rubylith-bill-of-materials.boxline", import.meta.url), "utf8");
   const graph = parseGraph(source);
@@ -147,7 +191,7 @@ test("Rubylith route safety survives the layout-control extremes", async () => {
 });
 
 test("layout controls change intrinsic geometry independently", () => {
-  const graph = parseGraph("state Input:\n  next -> Output\nstate Output:");
+  const graph = parseGraph("graph directed\n\nstate Input:\n  next -> Output\nstate Output:");
   const natural = layoutGraph(graph);
   const tall = layoutGraph(graph, { shape: -1 });
   const wide = layoutGraph(graph, { shape: 1 });

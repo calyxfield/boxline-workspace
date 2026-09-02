@@ -13,6 +13,8 @@ export const DEFAULT_LAYOUT_OPTIONS = Object.freeze({
   buffer: 32,
 });
 
+export const GRAPH_TYPES = Object.freeze(["directed", "optimized"]);
+
 function clamp(value, minimum, maximum, fallback) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;
@@ -48,7 +50,9 @@ function layoutGeometry(options) {
   };
 }
 
-export const EXAMPLE_SOURCE = `# A state box begins with "state Name:"
+export const EXAMPLE_SOURCE = `graph directed
+
+# A state box begins with "state Name:"
 # Each indented line becomes a labeled arrow.
 
 state Pump:
@@ -75,11 +79,30 @@ export function parseGraph(source) {
   const errors = [];
   const names = new Map();
   let current = null;
+  let type = null;
 
-  source.split(/\r?\n/).forEach((raw, index) => {
+  const lines = source.split(/\r?\n/);
+  const firstContentIndex = lines.findIndex((raw) => {
+    const trimmed = raw.trim();
+    return trimmed && !trimmed.startsWith("#");
+  });
+  const firstContent = firstContentIndex >= 0 ? lines[firstContentIndex].trim() : "";
+  const typeDeclaration = firstContent.match(/^graph\s+([a-z][a-z0-9_-]*)\s*$/i);
+  if (!typeDeclaration) {
+    errors.push(issue(firstContentIndex + 1 || 1, "Expected a `graph directed` or `graph optimized` declaration"));
+    return { type, nodes, edges: [], errors };
+  }
+  type = typeDeclaration[1].toLowerCase();
+  if (!GRAPH_TYPES.includes(type)) {
+    errors.push(issue(firstContentIndex + 1, `Graph type "${type}" is not supported`));
+    return { type, nodes, edges: [], errors };
+  }
+
+  lines.forEach((raw, index) => {
     const line = index + 1;
     const trimmed = raw.trim();
     if (!trimmed || trimmed.startsWith("#")) return;
+    if (index === firstContentIndex) return;
 
     const declaration = trimmed.match(/^state\s+(.+?)\s*:\s*$/i);
     if (declaration) {
@@ -133,7 +156,21 @@ export function parseGraph(source) {
   });
 
   errors.sort((left, right) => left.line - right.line);
-  return { nodes, edges, errors };
+  return { type, nodes, edges, errors };
+}
+
+export function setGraphType(source, type) {
+  if (!GRAPH_TYPES.includes(type)) throw new RangeError(`Unsupported graph type: ${type}`);
+  const lines = String(source).split(/\r?\n/);
+  const firstContentIndex = lines.findIndex((raw) => {
+    const trimmed = raw.trim();
+    return trimmed && !trimmed.startsWith("#");
+  });
+  if (firstContentIndex >= 0 && /^graph\s+\S+/i.test(lines[firstContentIndex].trim())) {
+    lines[firstContentIndex] = `graph ${type}`;
+    return lines.join("\n");
+  }
+  return [`graph ${type}`, "", ...lines].join("\n");
 }
 
 export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
@@ -168,6 +205,10 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
     if (!columns[column]) columns[column] = [];
     columns[column].push(node.id);
   });
+
+  const optimization = graph.type === "optimized"
+    ? optimizeLayerOrder(graph, layer, columns)
+    : null;
 
   const maximumRows = Math.max(...columns.map((column) => column?.length ?? 0));
   const rowGap = Math.max(geometry.rowGap, geometry.buffer * 2 + 16 * geometry.scale);
@@ -340,7 +381,88 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
     height,
     scale: geometry.scale,
     options: geometry.options,
+    optimization,
   };
+}
+
+function layerOrderScore(graph, layers, columns) {
+  const ranks = new Map();
+  columns.forEach((column, columnIndex) => {
+    (column || []).forEach((id, rowIndex) => ranks.set(id, { column: columnIndex, row: rowIndex }));
+  });
+
+  const forward = graph.edges.filter((edge) => layers.get(edge.target) > layers.get(edge.source));
+  let crossings = 0;
+  for (let leftIndex = 0; leftIndex < forward.length; leftIndex += 1) {
+    const left = forward[leftIndex];
+    const leftSource = ranks.get(left.source);
+    const leftTarget = ranks.get(left.target);
+    for (let rightIndex = leftIndex + 1; rightIndex < forward.length; rightIndex += 1) {
+      const right = forward[rightIndex];
+      const rightSource = ranks.get(right.source);
+      const rightTarget = ranks.get(right.target);
+      if (leftSource.column !== rightSource.column || leftTarget.column !== rightTarget.column) continue;
+      if (left.source === right.source || left.target === right.target) continue;
+      if ((leftSource.row - rightSource.row) * (leftTarget.row - rightTarget.row) < 0) crossings += 1;
+    }
+  }
+
+  let distance = 0;
+  for (const edge of graph.edges) {
+    if (edge.source === edge.target) continue;
+    const source = ranks.get(edge.source);
+    const target = ranks.get(edge.target);
+    const sourceRows = Math.max(1, columns[source.column].length - 1);
+    const targetRows = Math.max(1, columns[target.column].length - 1);
+    distance += Math.abs(source.row / sourceRows - target.row / targetRows);
+  }
+  return { crossings, distance };
+}
+
+function compareLayerScores(left, right) {
+  if (left.crossings !== right.crossings) return left.crossings - right.crossings;
+  if (Math.abs(left.distance - right.distance) > 1e-9) return left.distance - right.distance;
+  return 0;
+}
+
+function optimizeLayerOrder(graph, layers, columns) {
+  const before = layerOrderScore(graph, layers, columns);
+  let current = before;
+  let attempts = 0;
+  let accepted = 0;
+  let passes = 0;
+  const maximumPasses = Math.max(2, Math.min(24, graph.nodes.length));
+
+  for (; passes < maximumPasses; passes += 1) {
+    let changed = false;
+    const reverse = passes % 2 === 1;
+    const columnIndexes = columns.map((_, index) => index);
+    if (reverse) columnIndexes.reverse();
+    for (const columnIndex of columnIndexes) {
+      const column = columns[columnIndex];
+      if (!column || column.length < 2) continue;
+      const pairIndexes = Array.from({ length: column.length - 1 }, (_, index) => index);
+      if (reverse) pairIndexes.reverse();
+      for (const rowIndex of pairIndexes) {
+        attempts += 1;
+        [column[rowIndex], column[rowIndex + 1]] = [column[rowIndex + 1], column[rowIndex]];
+        const candidate = layerOrderScore(graph, layers, columns);
+        if (compareLayerScores(candidate, current) < 0) {
+          current = candidate;
+          accepted += 1;
+          changed = true;
+        } else {
+          [column[rowIndex], column[rowIndex + 1]] = [column[rowIndex + 1], column[rowIndex]];
+        }
+      }
+    }
+    if (!changed) {
+      passes += 1;
+      break;
+    }
+  }
+
+  return { passes, attempts, accepted, before, after: current };
 }
 
 function longestDagLayers(nodes, outgoing, indegree) {

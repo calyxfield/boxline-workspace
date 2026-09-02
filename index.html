@@ -73,6 +73,13 @@
       <div class="graph-app">
         <div class="app-toolbar graph-toolbar">
           <span class="graph-status" data-graph-status data-state="empty">WAITING FOR A STATE</span>
+          <label class="graph-type-control">
+            <span>TYPE</span>
+            <select data-graph-type aria-label="Graph type">
+              <option value="directed">DIRECTED</option>
+              <option value="optimized">OPTIMIZED</option>
+            </select>
+          </label>
           <span class="tool-spacer"></span>
           <button class="tool-button" data-graph-action="open-layout" type="button">LAYOUT</button>
           <div class="zoom-controls" aria-label="Graph zoom controls">
@@ -85,7 +92,7 @@
         </div>
         <div class="sheet-frame">
           <div class="graph-preview empty" data-graph-preview aria-live="polite"></div>
-          <div class="sheet-meta"><span>AUTOMATIC LAYOUT · CTRL+SCROLL ZOOM</span><span data-graph-file></span></div>
+          <div class="sheet-meta"><span data-graph-layout-mode>DIRECTED LAYOUT · CTRL+SCROLL ZOOM</span><span data-graph-file></span></div>
         </div>
       </div>
     </template>

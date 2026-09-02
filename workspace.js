@@ -1,11 +1,13 @@
 import {
   DEFAULT_LAYOUT_OPTIONS,
   EXAMPLE_SOURCE,
+  GRAPH_TYPES,
   buildPdf,
   layoutGraph,
   normalizeLayoutOptions,
   parseGraph,
   renderSvg,
+  setGraphType,
 } from "./graph.mjs";
 import { createSourceEditor } from "./vendor/codemirror.js";
 import {
@@ -205,7 +207,7 @@ function saveNow(announce = false) {
   window.clearTimeout(saveTimer);
   saveTimer = 0;
   const payload = {
-    version: 1,
+    version: 2,
     savedAt: new Date().toISOString(),
     model,
     activeWindowId,
@@ -243,6 +245,16 @@ function restore() {
     currentFolderId: String(payload.model.currentFolderId || "root"),
     selectedFileId: payload.model.selectedFileId ? String(payload.model.selectedFileId) : null,
   };
+  if (Number(payload.version) < 2) {
+    const migrateGraphSources = (node) => {
+      if (node.type === "file") {
+        node.content = setGraphType(node.content, "directed");
+        return;
+      }
+      node.children.forEach(migrateGraphSources);
+    };
+    migrateGraphSources(model.files);
+  }
   validActiveFile();
   if (findNode(model.files, model.currentFolderId)?.type !== "folder") model.currentFolderId = "root";
   windows = normalizeWindowState(payload.windows);
@@ -680,6 +692,17 @@ function setGraphLayoutOption(key, value) {
 
 function setupGraph(element) {
   const preview = element.querySelector("[data-graph-preview]");
+  element.querySelector("[data-graph-type]").addEventListener("change", (event) => {
+    const type = event.currentTarget.value;
+    if (!GRAPH_TYPES.includes(type)) return;
+    const file = fileNode();
+    if (!file) return;
+    const source = setGraphType(sourceEditor?.getSource() ?? file.content, type);
+    file.content = source;
+    if (sourceEditor) sourceEditor.setSource(source);
+    else updateCompilation(source);
+    scheduleSave();
+  });
   element.querySelector('[data-graph-action="open-layout"]').addEventListener("click", () => {
     openWindow("layout");
     updateGraphLayoutControls();
@@ -785,7 +808,17 @@ function renderGraph() {
   const status = element.querySelector("[data-graph-status]");
   const pdf = element.querySelector('[data-graph-action="export-pdf"]');
   const png = element.querySelector('[data-graph-action="export-png"]');
+  const type = element.querySelector("[data-graph-type]");
+  const mode = element.querySelector("[data-graph-layout-mode]");
   element.querySelector("[data-graph-file]").textContent = fileNode()?.name || "NO FILE";
+  type.value = GRAPH_TYPES.includes(graph.type) ? graph.type : "directed";
+  if (graph.type === "optimized" && layout.optimization) {
+    const swaps = layout.optimization.accepted;
+    const passes = layout.optimization.passes;
+    mode.textContent = `OPTIMIZED · ${swaps} ${swaps === 1 ? "SWAP" : "SWAPS"} · ${passes} ${passes === 1 ? "PASS" : "PASSES"}`;
+  } else {
+    mode.textContent = "DIRECTED LAYOUT · CTRL+SCROLL ZOOM";
+  }
   if (graph.errors.length) {
     status.textContent = `${graph.errors.length} ${graph.errors.length === 1 ? "ISSUE" : "ISSUES"}`;
     status.dataset.state = "error";
@@ -900,7 +933,7 @@ function setupFiles(element) {
     } else {
       const name = uniqueName(folder, input.value || "UNTITLED", ".boxline");
       const stateName = name.replace(/\.boxline$/i, "").replace(/[^a-z0-9]+/gi, " ").trim() || "Untitled";
-      const node = createDiagram(model.files, folder.id, name, `state ${stateName}:\n`);
+      const node = createDiagram(model.files, folder.id, name, `graph directed\n\nstate ${stateName}:\n`);
       model.selectedFileId = node.id;
     }
     hideCreateForm();
@@ -1110,11 +1143,13 @@ window.__boxlineWorkspace = Object.freeze({
     model: structuredClone(model),
     windows: structuredClone(windows),
     compiled: compiled ? {
+      type: compiled.graph.type,
       nodes: compiled.graph.nodes.length,
       edges: compiled.graph.edges.length,
       errors: compiled.graph.errors.length,
       width: compiled.layout.width,
       height: compiled.layout.height,
+      optimization: structuredClone(compiled.layout.optimization),
     } : null,
   }),
 });

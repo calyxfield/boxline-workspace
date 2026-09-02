@@ -1,3 +1,5 @@
+graph directed
+
 # Rubylith bill of materials for Supersymmetry 0.1.16.14.1
 # Every consumed item or fluid is a box feeding a recipe node.
 # Ingredient arrows carry local recipe quantities.
