@@ -172,7 +172,11 @@ try {
 
   await page.locator('.launch-button[data-app="files"]').click();
   assert.equal(await page.locator('[data-window="files"]').isVisible(), true);
-  await page.locator('.file-item[data-node-id="folder-examples"]').dblclick();
+  const examplesFolder = page.locator('.file-item[data-node-id="folder-examples"]');
+  const examplesFolderHandle = await examplesFolder.elementHandle();
+  await examplesFolder.click();
+  assert.equal(await examplesFolderHandle.evaluate((node) => node.isConnected), true);
+  await examplesFolder.dblclick();
   assert.equal(await page.locator('.file-item[data-node-id="file-firs-temperate"]').count(), 1);
   assert.equal(await page.locator('.file-item[data-node-id="file-firs-steeltown"]').count(), 1);
   await page.locator('.file-item[data-node-id="file-firs-temperate"]').dblclick();

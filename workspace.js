@@ -1103,7 +1103,9 @@ function renderFiles() {
     item.querySelector(".file-name").textContent = node.name;
     item.addEventListener("click", () => {
       model.selectedFileId = node.id;
-      renderFiles();
+      for (const candidate of grid.querySelectorAll(".file-item")) {
+        candidate.classList.toggle("selected", candidate === item);
+      }
       scheduleSave();
     });
     item.addEventListener("dblclick", () => {
@@ -1122,6 +1124,7 @@ function renderFiles() {
         model.currentFolderId = node.id;
         model.selectedFileId = null;
         renderFiles();
+        scheduleSave();
       } else openFile(node.id);
     });
     item.addEventListener("dragstart", (event) => {
