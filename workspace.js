@@ -21,6 +21,7 @@ import {
   folderTrail,
   moveNode,
   normalizeFiles,
+  updateBundledExamples,
   uniqueName,
   zoomedScrollOffset,
 } from "./workspace-model.mjs";
@@ -33,6 +34,19 @@ const minimizedList = document.querySelector("#minimized-list");
 const snapPreview = document.querySelector("#snap-preview");
 const toast = document.querySelector("#toast");
 const saveIndicator = document.querySelector("#save-indicator");
+const LEGACY_FIRS_FINGERPRINTS = Object.freeze({
+  "file-firs-temperate": "fabca3fd",
+  "file-firs-steeltown": "f3783bf8",
+});
+
+function sourceFingerprint(source) {
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
 
 const APPS = Object.freeze({
   editor: Object.freeze({
@@ -216,7 +230,7 @@ function saveNow(announce = false) {
   window.clearTimeout(saveTimer);
   saveTimer = 0;
   const payload = {
-    version: 3,
+    version: 4,
     savedAt: new Date().toISOString(),
     model,
     activeWindowId,
@@ -265,6 +279,13 @@ function restore() {
     migrateGraphSources(model.files);
   }
   if (Number(payload.version) < 3) addMissingBundledExamples(model.files, firsExamples.filter((file) => file.content));
+  if (Number(payload.version) < 4) {
+    updateBundledExamples(
+      model.files,
+      firsExamples.filter((file) => file.content),
+      (existing, candidate) => sourceFingerprint(existing.content) === LEGACY_FIRS_FINGERPRINTS[candidate.id],
+    );
+  }
   validActiveFile();
   if (findNode(model.files, model.currentFolderId)?.type !== "folder") model.currentFolderId = "root";
   windows = normalizeWindowState(payload.windows);
@@ -588,8 +609,10 @@ function updateCompilation(source) {
   const editorWindow = appWindow("editor");
   if (editorWindow) {
     const issues = editorWindow.querySelector("[data-editor-issues]");
+    const stateSyntax = editorWindow.querySelector("[data-editor-state-syntax]");
     const lines = source.split(/\r?\n/).length;
     editorWindow.querySelector("[data-editor-lines]").textContent = `${lines} LINE${lines === 1 ? "" : "S"}`;
+    stateSyntax.textContent = graph.type === "classified" ? "state Name [class]:" : "state Name:";
     issues.replaceChildren();
     for (const error of graph.errors) {
       const item = document.createElement("button");
@@ -822,10 +845,10 @@ function renderGraph() {
   const mode = element.querySelector("[data-graph-layout-mode]");
   element.querySelector("[data-graph-file]").textContent = fileNode()?.name || "NO FILE";
   type.value = GRAPH_TYPES.includes(graph.type) ? graph.type : "directed";
-  if (graph.type === "optimized" && layout.optimization) {
+  if ((graph.type === "optimized" || graph.type === "classified") && layout.optimization) {
     const swaps = layout.optimization.accepted;
     const passes = layout.optimization.passes;
-    mode.textContent = `OPTIMIZED · ${swaps} ${swaps === 1 ? "SWAP" : "SWAPS"} · ${passes} ${passes === 1 ? "PASS" : "PASSES"}`;
+    mode.textContent = `${graph.type.toUpperCase()} · ${swaps} ${swaps === 1 ? "SWAP" : "SWAPS"} · ${passes} ${passes === 1 ? "PASS" : "PASSES"}`;
   } else {
     mode.textContent = "DIRECTED LAYOUT · CTRL+SCROLL ZOOM";
   }

@@ -13,7 +13,7 @@ export const DEFAULT_LAYOUT_OPTIONS = Object.freeze({
   buffer: 32,
 });
 
-export const GRAPH_TYPES = Object.freeze(["directed", "optimized"]);
+export const GRAPH_TYPES = Object.freeze(["directed", "optimized", "classified"]);
 
 function clamp(value, minimum, maximum, fallback) {
   const numeric = Number(value);
@@ -77,9 +77,11 @@ export function parseGraph(source) {
   const nodes = [];
   const pendingEdges = [];
   const errors = [];
+  const classes = [];
   const names = new Map();
   let current = null;
   let type = null;
+  let columnsLine = null;
 
   const lines = source.split(/\r?\n/);
   const firstContentIndex = lines.findIndex((raw) => {
@@ -89,13 +91,13 @@ export function parseGraph(source) {
   const firstContent = firstContentIndex >= 0 ? lines[firstContentIndex].trim() : "";
   const typeDeclaration = firstContent.match(/^graph\s+([a-z][a-z0-9_-]*)\s*$/i);
   if (!typeDeclaration) {
-    errors.push(issue(firstContentIndex + 1 || 1, "Expected a `graph directed` or `graph optimized` declaration"));
-    return { type, nodes, edges: [], errors };
+    errors.push(issue(firstContentIndex + 1 || 1, "Expected a `graph directed`, `graph optimized`, or `graph classified` declaration"));
+    return { type, classes, nodes, edges: [], errors };
   }
   type = typeDeclaration[1].toLowerCase();
   if (!GRAPH_TYPES.includes(type)) {
     errors.push(issue(firstContentIndex + 1, `Graph type "${type}" is not supported`));
-    return { type, nodes, edges: [], errors };
+    return { type, classes, nodes, edges: [], errors };
   }
 
   lines.forEach((raw, index) => {
@@ -104,9 +106,47 @@ export function parseGraph(source) {
     if (!trimmed || trimmed.startsWith("#")) return;
     if (index === firstContentIndex) return;
 
-    const declaration = trimmed.match(/^state\s+(.+?)\s*:\s*$/i);
+    const columnsDeclaration = trimmed.match(/^columns(?:\s+(.+?))?\s*$/i);
+    if (columnsDeclaration) {
+      if (type !== "classified") {
+        errors.push(issue(line, "A `columns` declaration is only valid in a classified graph"));
+        return;
+      }
+      if (columnsLine !== null) {
+        errors.push(issue(line, `Columns were already declared on line ${columnsLine}`));
+        return;
+      }
+      if (nodes.length) {
+        errors.push(issue(line, "The columns declaration must appear before the first state"));
+        current = null;
+        return;
+      }
+      columnsLine = line;
+      const declared = (columnsDeclaration[1] || "").trim().split(/\s+/).filter(Boolean);
+      if (declared.length < 2) {
+        errors.push(issue(line, "A classified graph needs at least two column classes"));
+        return;
+      }
+      const normalized = declared.map((name) => name.toLowerCase());
+      const invalid = declared.find((name) => !/^[a-z][a-z0-9_-]*$/i.test(name));
+      if (invalid) {
+        errors.push(issue(line, `Column class "${invalid}" must use letters, numbers, hyphens, or underscores`));
+        return;
+      }
+      if (new Set(normalized).size !== normalized.length) {
+        errors.push(issue(line, "Column classes must be unique"));
+        return;
+      }
+      classes.push(...normalized);
+      return;
+    }
+
+    const declaration = type === "classified"
+      ? trimmed.match(/^state\s+(.+?)\s+\[([a-z][a-z0-9_-]*)\]\s*:\s*$/i)
+      : trimmed.match(/^state\s+(.+?)\s*:\s*$/i);
     if (declaration) {
       const name = declaration[1].trim();
+      const className = type === "classified" ? declaration[2].toLowerCase() : null;
       if (!name || name.includes("->")) {
         errors.push(issue(line, "State names cannot be empty or contain ->"));
         current = null;
@@ -117,9 +157,15 @@ export function parseGraph(source) {
         current = names.get(name);
         return;
       }
-      current = { id: name, name, line, order: nodes.length };
+      current = { id: name, name, className, line, order: nodes.length };
       names.set(name, current);
       nodes.push(current);
+      return;
+    }
+
+    if (type === "classified" && /^state\b/i.test(trimmed)) {
+      errors.push(issue(line, "Classified states use `state Name [class]:`"));
+      current = null;
       return;
     }
 
@@ -146,8 +192,21 @@ export function parseGraph(source) {
       return;
     }
 
-    errors.push(issue(line, 'Expected `state Name:` or `label -> Target state`'));
+    errors.push(issue(line, type === "classified"
+      ? 'Expected `state Name [class]:` or `label -> Target state`'
+      : 'Expected `state Name:` or `label -> Target state`'));
   });
+
+  if (type === "classified" && columnsLine === null) {
+    errors.push(issue(firstContentIndex + 1, "A classified graph needs a columns declaration such as `columns class-a class-b`"));
+  }
+  if (type === "classified" && classes.length) {
+    for (const node of nodes) {
+      if (!classes.includes(node.className)) {
+        errors.push(issue(node.line, `State class "${node.className}" is not listed in the columns declaration`));
+      }
+    }
+  }
 
   const edges = pendingEdges.filter((edge) => {
     if (names.has(edge.target)) return true;
@@ -156,7 +215,7 @@ export function parseGraph(source) {
   });
 
   errors.sort((left, right) => left.line - right.line);
-  return { type, nodes, edges, errors };
+  return { type, classes, nodes, edges, errors };
 }
 
 export function setGraphType(source, type) {
@@ -166,11 +225,56 @@ export function setGraphType(source, type) {
     const trimmed = raw.trim();
     return trimmed && !trimmed.startsWith("#");
   });
+  const currentType = firstContentIndex >= 0
+    ? lines[firstContentIndex].trim().match(/^graph\s+([a-z][a-z0-9_-]*)\s*$/i)?.[1]?.toLowerCase()
+    : null;
+
+  if (currentType === "classified" && type !== "classified") {
+    const withoutClasses = lines
+      .filter((raw, index) => index === firstContentIndex || !/^\s*columns(?:\s|$)/i.test(raw))
+      .map((raw) => raw.replace(/^(\s*state\s+)(.+?)\s+\[[a-z][a-z0-9_-]*\]\s*:\s*$/i, "$1$2:"));
+    withoutClasses[firstContentIndex] = `graph ${type}`;
+    return withoutClasses.join("\n");
+  }
+
+  if (type === "classified" && currentType !== "classified") {
+    const graph = parseGraph(String(source));
+    const layers = graph.errors.length ? new Map() : naturalLayers(graph);
+    for (const node of graph.nodes) {
+      const className = (layers.get(node.id) ?? node.order) % 2 === 0 ? "class-a" : "class-b";
+      lines[node.line - 1] = lines[node.line - 1].replace(/:\s*$/, ` [${className}]:`);
+    }
+    if (firstContentIndex >= 0 && /^graph\s+\S+/i.test(lines[firstContentIndex].trim())) {
+      lines[firstContentIndex] = "graph classified";
+      lines.splice(firstContentIndex + 1, 0, "columns class-a class-b");
+      return lines.join("\n");
+    }
+    return ["graph classified", "columns class-a class-b", "", ...lines].join("\n");
+  }
+
   if (firstContentIndex >= 0 && /^graph\s+\S+/i.test(lines[firstContentIndex].trim())) {
     lines[firstContentIndex] = `graph ${type}`;
     return lines.join("\n");
   }
   return [`graph ${type}`, "", ...lines].join("\n");
+}
+
+function graphTopology(graph) {
+  const outgoing = new Map(graph.nodes.map((node) => [node.id, []]));
+  const indegree = new Map(graph.nodes.map((node) => [node.id, 0]));
+  for (const edge of graph.edges) {
+    if (!outgoing.get(edge.source).includes(edge.target)) {
+      outgoing.get(edge.source).push(edge.target);
+      if (edge.source !== edge.target) indegree.set(edge.target, indegree.get(edge.target) + 1);
+    }
+  }
+  return { outgoing, indegree };
+}
+
+function naturalLayers(graph) {
+  const { outgoing, indegree } = graphTopology(graph);
+  return longestDagLayers(graph.nodes, outgoing, indegree)
+    ?? breadthFirstLayers(graph.nodes, outgoing, indegree);
 }
 
 export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
@@ -183,21 +287,18 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
       height: 460 * geometry.scale * geometry.verticalShape,
       scale: geometry.scale,
       options: geometry.options,
+      optimization: null,
+      columnHeaders: [],
     };
   }
 
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
-  const outgoing = new Map(graph.nodes.map((node) => [node.id, []]));
-  const indegree = new Map(graph.nodes.map((node) => [node.id, 0]));
-  for (const edge of graph.edges) {
-    if (!outgoing.get(edge.source).includes(edge.target)) {
-      outgoing.get(edge.source).push(edge.target);
-      if (edge.source !== edge.target) indegree.set(edge.target, indegree.get(edge.target) + 1);
-    }
-  }
-
-  const layer = longestDagLayers(graph.nodes, outgoing, indegree)
+  const { outgoing, indegree } = graphTopology(graph);
+  const natural = longestDagLayers(graph.nodes, outgoing, indegree)
     ?? breadthFirstLayers(graph.nodes, outgoing, indegree);
+  const layer = graph.type === "classified" && graph.classes?.length
+    ? classifiedLayers(graph, outgoing, indegree, natural)
+    : natural;
 
   const columns = [];
   graph.nodes.forEach((node) => {
@@ -206,11 +307,11 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
     columns[column].push(node.id);
   });
 
-  const optimization = graph.type === "optimized"
+  const optimization = graph.type === "optimized" || graph.type === "classified"
     ? optimizeLayerOrder(graph, layer, columns)
     : null;
 
-  const maximumRows = Math.max(...columns.map((column) => column?.length ?? 0));
+  const maximumRows = Math.max(...Array.from(columns, (column) => column?.length ?? 0));
   const rowGap = Math.max(geometry.rowGap, geometry.buffer * 2 + 16 * geometry.scale);
   const contentHeight = maximumRows * geometry.nodeHeight + Math.max(0, maximumRows - 1) * rowGap;
   const backwardCount = graph.edges.filter((edge) => layer.get(edge.target) < layer.get(edge.source)).length;
@@ -219,7 +320,9 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
     ? geometry.buffer + (22 + (backwardCount - 1) * 26) * geometry.scale
     : 0;
   const bottomRouteBand = longForwardCount ? (34 + (longForwardCount - 1) * 26) * geometry.scale : 0;
-  const drawingHeight = Math.max(420 * geometry.scale * geometry.verticalShape, contentHeight + (2 * geometry.margin));
+  const headerBand = graph.type === "classified" && graph.classes?.length ? 42 * geometry.scale : 0;
+  const contentDrawingHeight = Math.max(420 * geometry.scale * geometry.verticalShape, contentHeight + (2 * geometry.margin));
+  const drawingHeight = contentDrawingHeight + headerBand;
   const height = drawingHeight + topRouteBand + bottomRouteBand;
   const positions = new Map();
   const maximumLayer = Math.max(...layer.values());
@@ -249,11 +352,12 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
   columns.forEach((column, columnIndex) => {
     if (!column) return;
     const columnHeight = column.length * geometry.nodeHeight + Math.max(0, column.length - 1) * rowGap;
-    const top = topRouteBand + (drawingHeight - columnHeight) / 2;
+    const top = topRouteBand + headerBand + (contentDrawingHeight - columnHeight) / 2;
     column.forEach((id, rowIndex) => {
       positions.set(id, {
         id,
         name: nodeById.get(id).name,
+        className: nodeById.get(id).className,
         x: columnX[columnIndex],
         y: top + rowIndex * (geometry.nodeHeight + rowGap),
         width: geometry.nodeWidth,
@@ -261,6 +365,16 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
       });
     });
   });
+
+  const columnHeaders = graph.type === "classified" && graph.classes?.length
+    ? columnX.map((x, index) => ({
+      className: graph.classes[index % graph.classes.length],
+      x,
+      y: topRouteBand + 8 * geometry.scale,
+      width: geometry.nodeWidth,
+      height: 24 * geometry.scale,
+    }))
+    : [];
 
   const width = Math.max(720 * geometry.scale * geometry.horizontalShape, columnX[maximumLayer] + geometry.nodeWidth + geometry.margin);
   const parallelCount = new Map();
@@ -382,6 +496,7 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
     scale: geometry.scale,
     options: geometry.options,
     optimization,
+    columnHeaders,
   };
 }
 
@@ -436,7 +551,7 @@ function optimizeLayerOrder(graph, layers, columns) {
   for (; passes < maximumPasses; passes += 1) {
     let changed = false;
     const reverse = passes % 2 === 1;
-    const columnIndexes = columns.map((_, index) => index);
+    const columnIndexes = Array.from(columns, (_, index) => index);
     if (reverse) columnIndexes.reverse();
     for (const columnIndex of columnIndexes) {
       const column = columns[columnIndex];
@@ -539,6 +654,52 @@ function breadthFirstLayers(nodes, outgoing, indegree) {
     }
   }
   return layer;
+}
+
+function classifiedLayers(graph, outgoing, indegree, fallback) {
+  const classIndex = new Map(graph.classes.map((name, index) => [name, index]));
+  const classCount = graph.classes.length;
+  const alignedLayer = (minimum, className) => {
+    const desired = classIndex.get(className);
+    if (desired === undefined) return minimum;
+    const remainder = ((minimum % classCount) + classCount) % classCount;
+    return minimum + ((desired - remainder + classCount) % classCount);
+  };
+
+  const remaining = new Map(indegree);
+  const queue = graph.nodes.filter((node) => remaining.get(node.id) === 0).map((node) => node.id);
+  let cursor = 0;
+  while (cursor < queue.length) {
+    const source = queue[cursor];
+    cursor += 1;
+    for (const target of outgoing.get(source)) {
+      if (target === source) continue;
+      remaining.set(target, remaining.get(target) - 1);
+      if (remaining.get(target) === 0) queue.push(target);
+    }
+  }
+
+  if (queue.length !== graph.nodes.length) {
+    return new Map(graph.nodes.map((node) => [
+      node.id,
+      alignedLayer(fallback.get(node.id) ?? 0, node.className),
+    ]));
+  }
+
+  const incoming = new Map(graph.nodes.map((node) => [node.id, []]));
+  for (const edge of graph.edges) {
+    if (edge.source !== edge.target && !incoming.get(edge.target).includes(edge.source)) {
+      incoming.get(edge.target).push(edge.source);
+    }
+  }
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const layers = new Map();
+  for (const id of queue) {
+    const predecessorLayers = incoming.get(id).map((source) => layers.get(source) + 1);
+    const minimum = predecessorLayers.length ? Math.max(...predecessorLayers) : 0;
+    layers.set(id, alignedLayer(minimum, nodeById.get(id).className));
+  }
+  return layers;
 }
 
 function assignPorts(edges, positions, layers, geometry) {
@@ -946,6 +1107,14 @@ function nodeLabelLines(name, nodeWidth = BASE_NODE_WIDTH) {
 
 export function renderSvg(graph, layout) {
   const scale = layout.scale || 1;
+  const headers = (layout.columnHeaders || []).map((header) => {
+    const centerX = header.x + header.width / 2;
+    const bottom = header.y + header.height;
+    return `<g class="column-header">
+      <text x="${centerX}" y="${header.y + 15 * scale}">${escapeXml(header.className.toUpperCase())}</text>
+      <line x1="${header.x}" y1="${bottom}" x2="${header.x + header.width}" y2="${bottom}" />
+    </g>`;
+  }).join("\n");
   const edges = layout.edges.map((edge) => {
     const width = labelWidth(edge.label, scale);
     const path = edge.points
@@ -979,10 +1148,13 @@ export function renderSvg(graph, layout) {
       .edge polygon { fill: #111; }
       .edge rect { fill: #fff; }
       .edge text { fill: #111; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: ${13 * scale}px; text-anchor: middle; }
+      .column-header text { fill: #454541; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: ${11 * scale}px; font-weight: 700; letter-spacing: ${1.2 * scale}px; text-anchor: middle; }
+      .column-header line { stroke: #aaa9a2; stroke-width: ${1 * scale}; }
       .node rect { fill: #fff; stroke: #111; stroke-width: ${2 * scale}; }
       .node text { fill: #111; font-family: Inter, Arial, sans-serif; font-size: ${14 * scale}px; font-weight: 600; text-anchor: middle; }
     </style>
     <rect width="100%" height="100%" fill="#fff" />
+    ${headers}
     ${edges}
     ${nodes}
   </svg>`;
@@ -1029,6 +1201,19 @@ export function buildPdf(graph, layout) {
     y: pageHeight - (offsetY + y * scale),
   });
   const commands = ["1 J", "1 j", "0 0 0 RG", "0 0 0 rg"];
+
+  for (const header of layout.columnHeaders || []) {
+    const start = point({ x: header.x, y: header.y + header.height });
+    const end = point({ x: header.x + header.width, y: header.y + header.height });
+    const center = point({ x: header.x + header.width / 2, y: header.y + header.height / 2 });
+    const label = header.className.toUpperCase();
+    const fontSize = Math.max(7, Math.min(9, 10 * scale));
+    commands.push("0.65 0.65 0.62 RG");
+    commands.push(`${Math.max(0.6, scale).toFixed(3)} w ${start.x.toFixed(3)} ${start.y.toFixed(3)} m ${end.x.toFixed(3)} ${end.y.toFixed(3)} l S`);
+    commands.push("0.27 0.27 0.25 rg");
+    commands.push(`BT /F2 ${fontSize.toFixed(3)} Tf ${(center.x - label.length * fontSize * 0.29).toFixed(3)} ${(center.y - fontSize * 0.34).toFixed(3)} Td (${pdfEscape(label)}) Tj ET`);
+    commands.push("0 0 0 RG", "0 0 0 rg");
+  }
 
   for (const edge of layout.edges) {
     const path = edge.points.map(point);

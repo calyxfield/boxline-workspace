@@ -10,6 +10,7 @@ import {
   folderTrail,
   moveNode,
   normalizeFiles,
+  updateBundledExamples,
   uniqueName,
   zoomedScrollOffset,
 } from "../workspace-model.mjs";
@@ -37,6 +38,28 @@ test("new bundled examples are added once to an existing workspace", () => {
   assert.equal(addMissingBundledExamples(existing, examples), 1);
   assert.equal(findNode(existing, "file-firs-temperate").content, "state FIRS:");
   assert.equal(addMissingBundledExamples(existing, examples), 0);
+});
+
+test("bundled examples can be refreshed without touching user files", () => {
+  const existing = createDefaultFiles("state Pump:", "", [{
+    id: "file-firs-temperate",
+    name: "FIRS 4 TEMPERATE.boxline",
+    content: "graph optimized\n\nstate Old:",
+  }]);
+  createDiagram(existing, "folder-examples", "PERSONAL.boxline", "graph directed\n\nstate Mine:");
+  const updated = [{
+    id: "file-firs-temperate",
+    name: "FIRS 4 TEMPERATE.boxline",
+    content: "graph classified\ncolumns industry cargo\n\nstate New [industry]:",
+  }];
+
+  assert.equal(updateBundledExamples(existing, updated), 1);
+  assert.match(findNode(existing, "file-firs-temperate").content, /^graph classified/);
+  assert.equal(findNode(existing, "folder-examples").children.at(-1).content, "graph directed\n\nstate Mine:");
+
+  findNode(existing, "file-firs-temperate").content = "graph optimized\n\nstate Locally edited:";
+  assert.equal(updateBundledExamples(existing, updated, (file) => !/Locally edited/.test(file.content)), 0);
+  assert.match(findNode(existing, "file-firs-temperate").content, /Locally edited/);
 });
 
 test("folders and diagrams are created with collision-free names", () => {

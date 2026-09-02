@@ -114,7 +114,10 @@ test("graph type declaration is required and selects the layout engine", () => {
   assert.match(unsupported.errors[0].message, /not supported/);
 
   for (const type of GRAPH_TYPES) {
-    const graph = parseGraph(`graph ${type}\n\nstate Input:\n  next -> Output\nstate Output:`);
+    const body = type === "classified"
+      ? "columns source result\n\nstate Input [source]:\n  next -> Output\nstate Output [result]:"
+      : "state Input:\n  next -> Output\nstate Output:";
+    const graph = parseGraph(`graph ${type}\n\n${body}`);
     assert.equal(graph.type, type);
     assert.equal(graph.errors.length, 0);
     assert.equal(graph.nodes.length, 2);
@@ -122,11 +125,73 @@ test("graph type declaration is required and selects the layout engine", () => {
   }
 });
 
+test("classified graphs declare their column cycle and each state's class", () => {
+  const source = `graph classified
+columns industry cargo
+
+state Coal Mine [industry]:
+  makes -> COAL
+state COAL [cargo]:
+  used by -> Steel Mill
+state Steel Mill [industry]:`;
+  const graph = parseGraph(source);
+  assert.deepEqual(graph.classes, ["industry", "cargo"]);
+  assert.deepEqual(graph.nodes.map((node) => node.className), ["industry", "cargo", "industry"]);
+  assert.equal(graph.errors.length, 0);
+
+  const missingColumns = parseGraph("graph classified\n\nstate Input [source]:");
+  assert.match(missingColumns.errors[0].message, /columns declaration/);
+  const missingClass = parseGraph("graph classified\ncolumns source result\n\nstate Input:");
+  assert.match(missingClass.errors[0].message, /state Name \[class\]/);
+  const unknownClass = parseGraph("graph classified\ncolumns source result\n\nstate Input [other]:");
+  assert.match(unknownClass.errors[0].message, /not listed/);
+});
+
+test("classified layout repeats class columns and optimizes within them", () => {
+  const graph = parseGraph(`graph classified
+columns industry cargo
+
+state Mine [industry]:
+  makes -> ORE
+state ORE [cargo]:
+  used by -> Mill
+state Mill [industry]:
+  makes -> METAL
+state METAL [cargo]:`);
+  const layout = layoutGraph(graph);
+  const x = (name) => layout.nodes.get(name).x;
+
+  assert.ok(x("Mine") < x("ORE"));
+  assert.ok(x("ORE") < x("Mill"));
+  assert.ok(x("Mill") < x("METAL"));
+  assert.deepEqual(layout.columnHeaders.map((header) => header.className), ["industry", "cargo", "industry", "cargo"]);
+  assert.ok(layout.optimization);
+});
+
+test("classified layout keeps empty columns when an edge repeats a class", () => {
+  const graph = parseGraph(`graph classified
+columns industry cargo
+
+state First [industry]:
+  next -> Second
+state Second [industry]:`);
+  const layout = layoutGraph(graph);
+  assert.equal(Number.isFinite(layout.width), true);
+  assert.ok(layout.nodes.get("First").x < layout.nodes.get("Second").x);
+  assert.deepEqual(layout.columnHeaders.map((header) => header.className), ["industry", "cargo", "industry"]);
+});
+
 test("graph type can be changed without touching the shared grammar", () => {
   const directed = "graph directed\n\nstate Input:\n  next -> Output\nstate Output:";
   const optimized = setGraphType(directed, "optimized");
   assert.equal(optimized, directed.replace("graph directed", "graph optimized"));
   assert.equal(parseGraph(optimized).type, "optimized");
+  const classified = setGraphType(directed, "classified");
+  assert.match(classified, /^graph classified\ncolumns class-a class-b/m);
+  assert.match(classified, /state Input \[class-a\]:/);
+  assert.match(classified, /state Output \[class-b\]:/);
+  assert.equal(parseGraph(classified).errors.length, 0);
+  assert.equal(setGraphType(classified, "directed"), directed);
   assert.equal(setGraphType("state Input:", "directed"), "graph directed\n\nstate Input:");
   assert.throws(() => setGraphType(directed, "radial"), /Unsupported graph type/);
 });
@@ -146,7 +211,7 @@ test("optimized layout iteratively removes a crossing and is deterministic", () 
   assert.deepEqual(optimized.edges, repeated.edges);
 });
 
-test("FIRS 4 cargo examples import as optimized graphs", async () => {
+test("FIRS 4 cargo examples import as classified graphs", async () => {
   for (const [name, expectedNodes, expectedEdges] of [
     ["firs-4-temperate.boxline", 31, 35],
     ["firs-4-steeltown.boxline", 72, 100],
@@ -154,10 +219,13 @@ test("FIRS 4 cargo examples import as optimized graphs", async () => {
     const source = await readFile(new URL(`../examples/${name}`, import.meta.url), "utf8");
     const graph = parseGraph(source);
     assert.equal(graph.errors.length, 0);
-    assert.equal(graph.type, "optimized");
+    assert.equal(graph.type, "classified");
+    assert.deepEqual(graph.classes, ["industry", "cargo"]);
+    assert.ok(graph.nodes.every((node) => ["industry", "cargo"].includes(node.className)));
     assert.equal(graph.nodes.length, expectedNodes);
     assert.equal(graph.edges.length, expectedEdges);
     const layout = layoutGraph(graph);
+    assert.ok(layout.columnHeaders.length >= 2);
     assert.ok(layout.optimization.after.crossings <= layout.optimization.before.crossings);
   }
 });

@@ -1,251 +1,252 @@
-graph optimized
+graph classified
+columns industry cargo
 
 # FIRS 4 Steeltown cargo flow
 # Imported from the official FIRS 4.15.1 economy graph.
 # Source: https://grf.farm/firs/4.15.1/html/steeltown.dot
-# Industry names use title case. Cargo names use capitals.
+# Industry states use the industry class. Cargo states use the cargo class.
 # "makes" points to a cargo; "used by" points to its recipient.
 
-state Assembly Plant:
+state Assembly Plant [industry]:
   makes -> VEHICLES
 
-state Basic Oxygen Furnace:
+state Basic Oxygen Furnace [industry]:
   makes -> ALLOY STEEL
   makes -> CARBON STEEL
   makes -> SLAG
 
-state Blast Furnace:
+state Blast Furnace [industry]:
   makes -> CAST IRON
   makes -> PIG IRON
   makes -> SLAG
 
-state Body Plant:
+state Body Plant [industry]:
   makes -> VEHICLE BODIES
 
-state Bulk Terminal:
+state Bulk Terminal [industry]:
   makes -> ALUMINIUM
   makes -> FERROCHROME
   makes -> MANGANESE
   makes -> PLASTICS
   makes -> RUBBER
 
-state Carbon Black Plant:
+state Carbon Black Plant [industry]:
   makes -> CARBON BLACK
 
-state Chlor-alkali Plant:
+state Chlor-alkali Plant [industry]:
   makes -> ACID
   makes -> CHLORINE
   makes -> SODIUM HYDROXIDE
 
-state Coal Mine:
+state Coal Mine [industry]:
   makes -> COAL
 
-state Coke Oven:
+state Coke Oven [industry]:
   makes -> COAL TAR
   makes -> COKE
   makes -> SULPHUR
 
-state Component Factory:
+state Component Factory [industry]:
   makes -> VEHICLE PARTS
 
-state Cryo Plant:
+state Cryo Plant [industry]:
   makes -> OXYGEN
 
-state Electric Arc Furnace:
+state Electric Arc Furnace [industry]:
   makes -> CARBON STEEL
   makes -> SLAG
   makes -> STAINLESS STEEL
 
-state Engine Plant:
+state Engine Plant [industry]:
   makes -> VEHICLE ENGINES
 
-state Farm:
+state Farm [industry]:
   makes -> FOOD
 
-state Glass Works:
+state Glass Works [industry]:
   makes -> GLASS
 
-state Iron Ore Mine:
+state Iron Ore Mine [industry]:
   makes -> IRON ORE
 
-state Lime Kiln:
+state Lime Kiln [industry]:
   makes -> QUICKLIME
 
-state Limestone Mine:
+state Limestone Mine [industry]:
   makes -> LIMESTONE
 
-state Potash Mine:
+state Potash Mine [industry]:
   makes -> POTASH
   makes -> SALT
 
-state Quarry:
+state Quarry [industry]:
   makes -> LIMESTONE
   makes -> SAND
 
-state Scrap Yard:
+state Scrap Yard [industry]:
   makes -> SCRAP METAL
 
-state Sheet and Pipe Mill:
+state Sheet and Pipe Mill [industry]:
   makes -> PIPE
   makes -> STEEL SHEET
 
-state Slag Grinding Plant:
+state Slag Grinding Plant [industry]:
   makes -> CEMENT
 
-state Soda Ash Mine:
+state Soda Ash Mine [industry]:
   makes -> SALT
   makes -> SODA ASH
 
-state Towns:
+state Towns [industry]:
 
-state Tyre Plant:
+state Tyre Plant [industry]:
   makes -> TYRES
 
-state Wharf:
+state Wharf [industry]:
   makes -> CLEANING AGENTS
   makes -> ELECTRICAL PARTS
   makes -> PAINTS & COATINGS
   makes -> ZINC
 
-state Wire and Section Mill:
+state Wire and Section Mill [industry]:
   makes -> STEEL SECTIONS
   makes -> STEEL WIRE ROD
 
-state ACID:
+state ACID [cargo]:
   used by -> Sheet and Pipe Mill
   used by -> Wire and Section Mill
 
-state ALLOY STEEL:
+state ALLOY STEEL [cargo]:
   used by -> Component Factory
 
-state ALUMINIUM:
+state ALUMINIUM [cargo]:
   used by -> Engine Plant
 
-state CARBON BLACK:
+state CARBON BLACK [cargo]:
   used by -> Tyre Plant
 
-state CARBON STEEL:
+state CARBON STEEL [cargo]:
   used by -> Sheet and Pipe Mill
   used by -> Wire and Section Mill
 
-state CAST IRON:
+state CAST IRON [cargo]:
   used by -> Engine Plant
 
-state CEMENT:
+state CEMENT [cargo]:
   used by -> Wharf
 
-state CHLORINE:
+state CHLORINE [cargo]:
   used by -> Bulk Terminal
 
-state CLEANING AGENTS:
+state CLEANING AGENTS [cargo]:
   used by -> Wire and Section Mill
 
-state COAL:
+state COAL [cargo]:
   used by -> Coke Oven
 
-state COAL TAR:
+state COAL TAR [cargo]:
   used by -> Carbon Black Plant
 
-state COKE:
+state COKE [cargo]:
   used by -> Blast Furnace
 
-state ELECTRICAL PARTS:
+state ELECTRICAL PARTS [cargo]:
   used by -> Component Factory
 
-state FERROCHROME:
+state FERROCHROME [cargo]:
   used by -> Electric Arc Furnace
 
-state FOOD:
+state FOOD [cargo]:
   used by -> Bulk Terminal
   used by -> Towns
 
-state GLASS:
+state GLASS [cargo]:
   used by -> Body Plant
 
-state IRON ORE:
+state IRON ORE [cargo]:
   used by -> Blast Furnace
 
-state LIMESTONE:
+state LIMESTONE [cargo]:
   used by -> Blast Furnace
   used by -> Lime Kiln
 
-state MANGANESE:
+state MANGANESE [cargo]:
   used by -> Basic Oxygen Furnace
 
-state OXYGEN:
+state OXYGEN [cargo]:
   used by -> Basic Oxygen Furnace
   used by -> Electric Arc Furnace
 
-state PAINTS & COATINGS:
+state PAINTS & COATINGS [cargo]:
   used by -> Body Plant
 
-state PIG IRON:
+state PIG IRON [cargo]:
   used by -> Basic Oxygen Furnace
 
-state PIPE:
+state PIPE [cargo]:
   used by -> Wharf
 
-state PLASTICS:
+state PLASTICS [cargo]:
   used by -> Component Factory
 
-state POTASH:
+state POTASH [cargo]:
   used by -> Bulk Terminal
 
-state QUICKLIME:
+state QUICKLIME [cargo]:
   used by -> Basic Oxygen Furnace
   used by -> Electric Arc Furnace
 
-state RUBBER:
+state RUBBER [cargo]:
   used by -> Tyre Plant
 
-state SALT:
+state SALT [cargo]:
   used by -> Chlor-alkali Plant
 
-state SAND:
+state SAND [cargo]:
   used by -> Engine Plant
   used by -> Glass Works
 
-state SCRAP METAL:
+state SCRAP METAL [cargo]:
   used by -> Electric Arc Furnace
 
-state SLAG:
+state SLAG [cargo]:
   used by -> Slag Grinding Plant
 
-state SODA ASH:
+state SODA ASH [cargo]:
   used by -> Glass Works
 
-state SODIUM HYDROXIDE:
+state SODIUM HYDROXIDE [cargo]:
   used by -> Wharf
 
-state STAINLESS STEEL:
+state STAINLESS STEEL [cargo]:
   used by -> Component Factory
 
-state STEEL SECTIONS:
+state STEEL SECTIONS [cargo]:
   used by -> Wharf
 
-state STEEL SHEET:
+state STEEL SHEET [cargo]:
   used by -> Body Plant
 
-state STEEL WIRE ROD:
+state STEEL WIRE ROD [cargo]:
   used by -> Tyre Plant
 
-state SULPHUR:
+state SULPHUR [cargo]:
   used by -> Tyre Plant
 
-state TYRES:
+state TYRES [cargo]:
   used by -> Assembly Plant
 
-state VEHICLE BODIES:
+state VEHICLE BODIES [cargo]:
   used by -> Assembly Plant
 
-state VEHICLE ENGINES:
+state VEHICLE ENGINES [cargo]:
   used by -> Assembly Plant
 
-state VEHICLE PARTS:
+state VEHICLE PARTS [cargo]:
   used by -> Assembly Plant
 
-state VEHICLES:
+state VEHICLES [cargo]:
   used by -> Towns
 
-state ZINC:
+state ZINC [cargo]:
   used by -> Sheet and Pipe Mill

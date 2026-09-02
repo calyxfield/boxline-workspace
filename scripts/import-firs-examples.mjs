@@ -70,10 +70,13 @@ function boxlineSource(economy, dot) {
   const edges = [];
   const edgeKeys = new Set();
   const outgoing = new Map();
+  const classes = new Map();
 
   for (const edge of importedEdges) {
     const source = boxlineName(edge.source, labels);
     const target = boxlineName(edge.target, labels);
+    classes.set(source, edge.source.startsWith("C_") ? "cargo" : "industry");
+    classes.set(target, edge.target.startsWith("C_") ? "cargo" : "industry");
     const label = edge.source.startsWith("I_") ? "makes" : "used by";
     const key = `${source}\u0000${label}\u0000${target}`;
     if (edgeKeys.has(key)) continue;
@@ -92,17 +95,18 @@ function boxlineSource(economy, dot) {
 
   const body = names.map((name) => {
     const arrows = outgoing.get(name) || [];
-    const lines = [`state ${name}:`];
+    const lines = [`state ${name} [${classes.get(name)}]:`];
     for (const edge of arrows) lines.push(`  ${edge.label} -> ${edge.target}`);
     return lines.join("\n");
   }).join("\n\n");
 
-  return `graph optimized
+  return `graph classified
+columns industry cargo
 
 # ${economy.title} cargo flow
 # Imported from the official FIRS ${FIRS_VERSION} economy graph.
 # Source: ${SOURCE_ROOT}/${economy.slug}.dot
-# Industry names use title case. Cargo names use capitals.
+# Industry states use the industry class. Cargo states use the cargo class.
 # "makes" points to a cargo; "used by" points to its recipient.
 
 ${body}

@@ -75,6 +75,19 @@ export function addMissingBundledExamples(root, bundledExamples) {
   return added;
 }
 
+export function updateBundledExamples(root, bundledExamples, shouldUpdate = () => true) {
+  let updated = 0;
+  for (const candidate of bundledExamples) {
+    const existing = findNode(root, String(candidate.id));
+    if (!existing || existing.type !== "file") continue;
+    const content = String(candidate.content);
+    if (existing.content === content || !shouldUpdate(existing, candidate)) continue;
+    existing.content = content;
+    updated += 1;
+  }
+  return updated;
+}
+
 export function normalizeFiles(root, fallback) {
   if (!root || root.type !== "folder" || !Array.isArray(root.children)) return fallback;
   const seen = new Set();

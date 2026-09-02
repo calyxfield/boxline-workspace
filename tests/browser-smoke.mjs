@@ -62,6 +62,14 @@ try {
   assert.match(await page.locator("[data-graph-layout-mode]").textContent(), /^OPTIMIZED · \d+ SWAPS? · \d+ (?:PASS|PASSES)$/);
   assert.equal((await page.evaluate(() => window.__boxlineWorkspace.getState().compiled)).type, "optimized");
 
+  await page.locator("[data-graph-type]").selectOption("classified");
+  assert.match(await page.evaluate(() => window.boxlineEditor.getSource()), /^graph classified\ncolumns class-a class-b/);
+  assert.equal(await page.locator("[data-graph-preview] .column-header").count(), 3);
+  assert.match(await page.locator("[data-graph-layout-mode]").textContent(), /^CLASSIFIED · \d+ SWAPS? · \d+ (?:PASS|PASSES)$/);
+  assert.equal((await page.evaluate(() => window.__boxlineWorkspace.getState().compiled)).type, "classified");
+  await page.locator("[data-graph-type]").selectOption("optimized");
+  assert.doesNotMatch(await page.evaluate(() => window.boxlineEditor.getSource()), /^columns /m);
+
   const zoomWidthBefore = await page.locator("[data-graph-preview] svg").evaluate((svg) => svg.getBoundingClientRect().width);
   await page.locator('[data-graph-action="zoom-in"]').click();
   assert.equal(await page.locator('[data-graph-action="zoom-reset"]').textContent(), "110%");
@@ -160,7 +168,8 @@ try {
   await page.locator('.file-item[data-node-id="file-firs-temperate"]').dblclick();
   assert.match(await page.locator('[data-window="editor"] .window-title').textContent(), /FIRS 4 TEMPERATE\.boxline/);
   assert.equal(await page.locator("[data-graph-status]").textContent(), "31 STATES · 35 ARROWS");
-  assert.equal(await page.locator("[data-graph-type]").inputValue(), "optimized");
+  assert.equal(await page.locator("[data-graph-type]").inputValue(), "classified");
+  assert.ok(await page.locator("[data-graph-preview] .column-header").count() >= 2);
   await page.locator('[data-files-action="new-diagram"]').click();
   await page.locator("[data-file-name]").fill("DEPENDENCY TEST");
   await page.locator("[data-file-create]").evaluate((form) => form.requestSubmit());

@@ -1,104 +1,105 @@
-graph optimized
+graph classified
+columns industry cargo
 
 # FIRS 4 Temperate cargo flow
 # Imported from the official FIRS 4.15.1 economy graph.
 # Source: https://grf.farm/firs/4.15.1/html/temperate_basic.dot
-# Industry names use title case. Cargo names use capitals.
+# Industry states use the industry class. Cargo states use the cargo class.
 # "makes" points to a cargo; "used by" points to its recipient.
 
-state Cider Mill:
+state Cider Mill [industry]:
   makes -> ALCOHOL
 
-state Clay Pit:
+state Clay Pit [industry]:
   makes -> CHINA CLAY
 
-state Coal Mine:
+state Coal Mine [industry]:
   makes -> COAL
 
-state Dairy:
+state Dairy [industry]:
   makes -> FOOD
 
-state Dairy Farm:
+state Dairy Farm [industry]:
   makes -> LIVESTOCK
   makes -> MILK
 
-state Dredging Site:
+state Dredging Site [industry]:
   makes -> SAND
 
-state Fishing Grounds:
+state Fishing Grounds [industry]:
   makes -> FISH
 
-state Fishing Harbour:
+state Fishing Harbour [industry]:
   makes -> FOOD
 
-state Glass Works:
+state Glass Works [industry]:
   makes -> GOODS
 
-state Iron Ore Mine:
+state Iron Ore Mine [industry]:
   makes -> IRON ORE
 
-state Metal Workshop:
+state Metal Workshop [industry]:
   makes -> GOODS
 
-state Orchard and Piggery:
+state Orchard and Piggery [industry]:
   makes -> FRUIT
   makes -> LIVESTOCK
 
-state Port:
+state Port [industry]:
   makes -> CHEMICALS
 
-state Scrap Yard:
+state Scrap Yard [industry]:
   makes -> SCRAP METAL
 
-state Steel Mill:
+state Steel Mill [industry]:
   makes -> STEEL
 
-state Stockyard:
+state Stockyard [industry]:
   makes -> FOOD
 
-state Towns:
+state Towns [industry]:
 
-state ALCOHOL:
+state ALCOHOL [cargo]:
   used by -> Towns
 
-state CHEMICALS:
+state CHEMICALS [cargo]:
   used by -> Glass Works
   used by -> Metal Workshop
 
-state CHINA CLAY:
+state CHINA CLAY [cargo]:
   used by -> Port
 
-state COAL:
+state COAL [cargo]:
   used by -> Steel Mill
 
-state FISH:
+state FISH [cargo]:
   used by -> Fishing Harbour
 
-state FOOD:
+state FOOD [cargo]:
   used by -> Port
   used by -> Towns
 
-state FRUIT:
+state FRUIT [cargo]:
   used by -> Cider Mill
 
-state GOODS:
+state GOODS [cargo]:
   used by -> Port
   used by -> Towns
 
-state IRON ORE:
+state IRON ORE [cargo]:
   used by -> Steel Mill
 
-state LIVESTOCK:
+state LIVESTOCK [cargo]:
   used by -> Stockyard
 
-state MILK:
+state MILK [cargo]:
   used by -> Dairy
 
-state SAND:
+state SAND [cargo]:
   used by -> Glass Works
 
-state SCRAP METAL:
+state SCRAP METAL [cargo]:
   used by -> Steel Mill
 
-state STEEL:
+state STEEL [cargo]:
   used by -> Metal Workshop
