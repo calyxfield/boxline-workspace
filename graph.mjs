@@ -21,7 +21,7 @@ export const DEFAULT_LAYOUT_OPTIONS = Object.freeze({
   buffer: 32,
 });
 
-export const GRAPH_TYPES = Object.freeze(["directed", "optimized", "classified"]);
+export const GRAPH_TYPES = Object.freeze(["directed", "optimized", "classified", "timeline"]);
 
 function clamp(value, minimum, maximum, fallback) {
   const numeric = Number(value);
@@ -90,6 +90,9 @@ export function parseGraph(source) {
   let current = null;
   let type = null;
   let columnsLine = null;
+  let rowsLine = null;
+  let baseLine = null;
+  let base = null;
 
   const lines = source.split(/\r?\n/);
   const firstContentIndex = lines.findIndex((raw) => {
@@ -99,95 +102,192 @@ export function parseGraph(source) {
   const firstContent = firstContentIndex >= 0 ? lines[firstContentIndex].trim() : "";
   const typeDeclaration = firstContent.match(/^graph\s+([a-z][a-z0-9_-]*)\s*$/i);
   if (!typeDeclaration) {
-    errors.push(issue(firstContentIndex + 1 || 1, "Expected a `graph directed`, `graph optimized`, or `graph classified` declaration"));
-    return { type, classes, nodes, edges: [], errors };
+    errors.push(issue(firstContentIndex + 1 || 1, "Expected a `graph directed`, `graph optimized`, `graph classified`, or `graph timeline` declaration"));
+    return { type, classes, base, nodes, edges: [], errors };
   }
   type = typeDeclaration[1].toLowerCase();
   if (!GRAPH_TYPES.includes(type)) {
     errors.push(issue(firstContentIndex + 1, `Graph type "${type}" is not supported`));
-    return { type, classes, nodes, edges: [], errors };
+    return { type, classes, base, nodes, edges: [], errors };
   }
 
-  lines.forEach((raw, index) => {
+  for (let index = 0; index < lines.length; index += 1) {
+    const raw = lines[index];
     const line = index + 1;
     const trimmed = raw.trim();
-    if (!trimmed || trimmed.startsWith("#")) return;
-    if (index === firstContentIndex) return;
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    if (index === firstContentIndex) continue;
 
     const columnsDeclaration = trimmed.match(/^columns(?:\s+(.+?))?\s*$/i);
     if (columnsDeclaration) {
       if (type !== "classified") {
         errors.push(issue(line, "A `columns` declaration is only valid in a classified graph"));
-        return;
+        continue;
       }
       if (columnsLine !== null) {
         errors.push(issue(line, `Columns were already declared on line ${columnsLine}`));
-        return;
+        continue;
       }
       if (nodes.length) {
         errors.push(issue(line, "The columns declaration must appear before the first state"));
         current = null;
-        return;
+        continue;
       }
       columnsLine = line;
       const declared = (columnsDeclaration[1] || "").trim().split(/\s+/).filter(Boolean);
       if (declared.length < 2) {
         errors.push(issue(line, "A classified graph needs at least two column classes"));
-        return;
+        continue;
       }
       const normalized = declared.map((name) => name.toLowerCase());
       const invalid = declared.find((name) => !/^[a-z][a-z0-9_-]*$/i.test(name));
       if (invalid) {
         errors.push(issue(line, `Column class "${invalid}" must use letters, numbers, hyphens, or underscores`));
-        return;
+        continue;
       }
       if (new Set(normalized).size !== normalized.length) {
         errors.push(issue(line, "Column classes must be unique"));
-        return;
+        continue;
       }
       classes.push(...normalized);
-      return;
+      continue;
     }
 
-    const declaration = type === "classified"
+    const rowsDeclaration = trimmed.match(/^rows(?:\s+(.+?))?\s*$/i);
+    if (rowsDeclaration) {
+      if (type !== "timeline") {
+        errors.push(issue(line, "A `rows` declaration is only valid in a timeline graph"));
+        continue;
+      }
+      if (rowsLine !== null) {
+        errors.push(issue(line, `Rows were already declared on line ${rowsLine}`));
+        continue;
+      }
+      if (nodes.length) {
+        errors.push(issue(line, "The rows declaration must appear before the first state"));
+        current = null;
+        continue;
+      }
+      rowsLine = line;
+      const declared = (rowsDeclaration[1] || "").trim().split(/\s+/).filter(Boolean);
+      if (!declared.length) {
+        errors.push(issue(line, "A timeline graph needs at least one row category"));
+        continue;
+      }
+      const normalized = declared.map((name) => name.toLowerCase());
+      const invalid = declared.find((name) => !/^[a-z][a-z0-9_-]*$/i.test(name));
+      if (invalid) {
+        errors.push(issue(line, `Row category "${invalid}" must use letters, numbers, hyphens, or underscores`));
+        continue;
+      }
+      if (new Set(normalized).size !== normalized.length) {
+        errors.push(issue(line, "Row categories must be unique"));
+        continue;
+      }
+      classes.push(...normalized);
+      continue;
+    }
+
+    const baseDeclaration = trimmed.match(/^base(?:\s+(.+?))?\s*$/i);
+    if (baseDeclaration) {
+      if (type !== "timeline") {
+        errors.push(issue(line, "A `base` declaration is only valid in a timeline graph"));
+        continue;
+      }
+      if (baseLine !== null) {
+        errors.push(issue(line, `The base was already declared on line ${baseLine}`));
+        continue;
+      }
+      if (nodes.length) {
+        errors.push(issue(line, "The base declaration must appear before the first state"));
+        current = null;
+        continue;
+      }
+      baseLine = line;
+      base = (baseDeclaration[1] || "").trim() || null;
+      if (!base) errors.push(issue(line, "A timeline base must name a state"));
+      continue;
+    }
+
+    const classifiedState = type === "classified" || type === "timeline";
+    const declaration = classifiedState
       ? trimmed.match(/^state\s+(.+?)\s+\[([a-z][a-z0-9_-]*)\]\s*:\s*$/i)
       : trimmed.match(/^state\s+(.+?)\s*:\s*$/i);
     if (declaration) {
       const name = declaration[1].trim();
-      const className = type === "classified" ? declaration[2].toLowerCase() : null;
+      const className = classifiedState ? declaration[2].toLowerCase() : null;
       if (!name || name.includes("->")) {
         errors.push(issue(line, "State names cannot be empty or contain ->"));
         current = null;
-        return;
+        continue;
       }
       if (names.has(name)) {
         errors.push(issue(line, `State "${name}" was already declared on line ${names.get(name).line}`));
         current = names.get(name);
-        return;
+        continue;
       }
-      current = { id: name, name, className, line, order: nodes.length };
+      current = { id: name, name, className, text: "", line, order: nodes.length };
       names.set(name, current);
       nodes.push(current);
-      return;
+      continue;
     }
 
-    if (type === "classified" && /^state\b/i.test(trimmed)) {
-      errors.push(issue(line, "Classified states use `state Name [class]:`"));
+    if (classifiedState && /^state\b/i.test(trimmed)) {
+      errors.push(issue(line, `${type === "timeline" ? "Timeline" : "Classified"} states use \`state Name [${type === "timeline" ? "row" : "class"}]:\``));
       current = null;
-      return;
+      continue;
+    }
+
+    const textDeclaration = trimmed.match(/^text\s*:(.*)$/i);
+    if (textDeclaration) {
+      if (!current) {
+        errors.push(issue(line, "Text must appear below a state declaration"));
+        continue;
+      }
+      if (current.text) {
+        errors.push(issue(line, `State "${current.name}" already has text`));
+        continue;
+      }
+      const inline = textDeclaration[1].trim();
+      if (inline) {
+        current.text = inline;
+        continue;
+      }
+      const declarationIndent = raw.match(/^\s*/)[0].length;
+      const body = [];
+      let cursor = index + 1;
+      for (; cursor < lines.length; cursor += 1) {
+        const bodyRaw = lines[cursor];
+        if (!bodyRaw.trim()) {
+          body.push("");
+          continue;
+        }
+        const indent = bodyRaw.match(/^\s*/)[0].length;
+        if (indent <= declarationIndent) break;
+        body.push(bodyRaw);
+      }
+      while (body.length && !body.at(-1).trim()) body.pop();
+      if (!body.length) {
+        errors.push(issue(line, "A multiline text block needs an indented body"));
+      } else {
+        const indentation = Math.min(...body.filter((entry) => entry.trim()).map((entry) => entry.match(/^\s*/)[0].length));
+        current.text = body.map((entry) => entry.slice(indentation).trimEnd()).join("\n");
+        index = cursor - 1;
+      }
+      continue;
     }
 
     const edge = trimmed.match(/^(.+?)\s*->\s*(.+?)\s*$/);
     if (edge) {
       if (!current) {
         errors.push(issue(line, "An arrow must appear below a state declaration"));
-        return;
+        continue;
       }
       const label = edge[1].trim();
       const target = edge[2].trim();
       if (!label || !target) {
         errors.push(issue(line, "Arrows need both a label and a target state"));
-        return;
+        continue;
       }
       pendingEdges.push({
         id: `edge-${pendingEdges.length}`,
@@ -197,13 +297,13 @@ export function parseGraph(source) {
         line,
         order: pendingEdges.length,
       });
-      return;
+      continue;
     }
 
-    errors.push(issue(line, type === "classified"
-      ? 'Expected `state Name [class]:` or `label -> Target state`'
-      : 'Expected `state Name:` or `label -> Target state`'));
-  });
+    errors.push(issue(line, classifiedState
+      ? `Expected \`state Name [${type === "timeline" ? "row" : "class"}]:\`, \`text: ...\`, or \`label -> Target state\``
+      : 'Expected `state Name:`, `text: ...`, or `label -> Target state`'));
+  }
 
   if (type === "classified" && columnsLine === null) {
     errors.push(issue(firstContentIndex + 1, "A classified graph needs a columns declaration such as `columns class-a class-b`"));
@@ -215,6 +315,26 @@ export function parseGraph(source) {
       }
     }
   }
+  if (type === "timeline" && rowsLine === null) {
+    errors.push(issue(firstContentIndex + 1, "A timeline graph needs a rows declaration such as `rows timeline context detail`"));
+  }
+  if (type === "timeline" && baseLine === null) {
+    errors.push(issue(firstContentIndex + 1, "A timeline graph needs a base declaration such as `base Start`"));
+  }
+  if (type === "timeline" && classes.length) {
+    for (const node of nodes) {
+      if (!classes.includes(node.className)) {
+        errors.push(issue(node.line, `State row "${node.className}" is not listed in the rows declaration`));
+      }
+    }
+  }
+  if (type === "timeline" && base) {
+    const baseNode = names.get(base);
+    if (!baseNode) errors.push(issue(baseLine, `Base state "${base}" has no declaration`));
+    else if (classes.length && baseNode.className !== classes[0]) {
+      errors.push(issue(baseLine, `Base state "${base}" must be in the first row, "${classes[0]}"`));
+    }
+  }
 
   const edges = pendingEdges.filter((edge) => {
     if (names.has(edge.target)) return true;
@@ -223,7 +343,7 @@ export function parseGraph(source) {
   });
 
   errors.sort((left, right) => left.line - right.line);
-  return { type, classes, nodes, edges, errors };
+  return { type, classes, base, nodes, edges, errors };
 }
 
 export function setGraphType(source, type) {
@@ -237,34 +357,51 @@ export function setGraphType(source, type) {
     ? lines[firstContentIndex].trim().match(/^graph\s+([a-z][a-z0-9_-]*)\s*$/i)?.[1]?.toLowerCase()
     : null;
 
-  if (currentType === "classified" && type !== "classified") {
-    const withoutClasses = lines
-      .filter((raw, index) => index === firstContentIndex || !/^\s*columns(?:\s|$)/i.test(raw))
-      .map((raw) => raw.replace(/^(\s*state\s+)(.+?)\s+\[[a-z][a-z0-9_-]*\]\s*:\s*$/i, "$1$2:"));
-    withoutClasses[firstContentIndex] = `graph ${type}`;
-    return withoutClasses.join("\n");
-  }
+  const graph = parseGraph(String(source));
+  const annotatedSource = currentType === "classified" || currentType === "timeline";
+  const annotatedTarget = type === "classified" || type === "timeline";
+  const targetClasses = annotatedSource && graph.classes.length
+    ? graph.classes
+    : type === "timeline" ? ["timeline", "context"] : ["class-a", "class-b"];
+  const layers = !annotatedSource && type === "classified" && !graph.errors.length
+    ? naturalLayers(graph)
+    : new Map();
+  let stateIndex = 0;
+  let transformed = lines
+    .filter((raw) => !/^(?:columns|rows|base)(?:\s|$)/i.test(raw))
+    .map((raw) => {
+      const state = raw.match(/^(\s*state\s+)(.+?)(?:\s+\[([a-z][a-z0-9_-]*)\])?\s*:\s*$/i);
+      if (!state) return raw;
+      const node = graph.nodes[stateIndex];
+      stateIndex += 1;
+      if (!annotatedTarget) return `${state[1]}${state[2].trim()}:`;
+      const existing = state[3]?.toLowerCase();
+      let className = existing && targetClasses.includes(existing) ? existing : targetClasses[0];
+      if (!existing && type === "classified") {
+        const provisionalLayer = layers.get(node?.id) ?? node?.order ?? stateIndex - 1;
+        className = provisionalLayer % 2 === 0 ? targetClasses[0] : targetClasses[1];
+      }
+      return `${state[1]}${state[2].trim()} [${className}]:`;
+    });
 
-  if (type === "classified" && currentType !== "classified") {
-    const graph = parseGraph(String(source));
-    const layers = graph.errors.length ? new Map() : naturalLayers(graph);
-    for (const node of graph.nodes) {
-      const className = (layers.get(node.id) ?? node.order) % 2 === 0 ? "class-a" : "class-b";
-      lines[node.line - 1] = lines[node.line - 1].replace(/:\s*$/, ` [${className}]:`);
-    }
-    if (firstContentIndex >= 0 && /^graph\s+\S+/i.test(lines[firstContentIndex].trim())) {
-      lines[firstContentIndex] = "graph classified";
-      lines.splice(firstContentIndex + 1, 0, "columns class-a class-b");
-      return lines.join("\n");
-    }
-    return ["graph classified", "columns class-a class-b", "", ...lines].join("\n");
+  let graphIndex = transformed.findIndex((raw) => /^\s*graph\s+\S+/i.test(raw));
+  if (graphIndex < 0) {
+    transformed = [`graph ${type}`, "", ...transformed];
+    graphIndex = 0;
+  } else {
+    transformed[graphIndex] = `graph ${type}`;
   }
-
-  if (firstContentIndex >= 0 && /^graph\s+\S+/i.test(lines[firstContentIndex].trim())) {
-    lines[firstContentIndex] = `graph ${type}`;
-    return lines.join("\n");
+  if (type === "classified") {
+    transformed.splice(graphIndex + 1, 0, `columns ${targetClasses.join(" ")}`);
+  } else if (type === "timeline") {
+    const annotatedStates = transformed.filter((raw) => /^\s*state\s+/i.test(raw));
+    const firstState = annotatedStates[0]?.match(/^\s*state\s+(.+?)\s+\[[^\]]+\]\s*:\s*$/i)?.[1]?.trim();
+    const baseState = graph.base && graph.nodes.some((node) => node.id === graph.base && node.className === targetClasses[0])
+      ? graph.base
+      : graph.nodes.find((node) => node.className === targetClasses[0])?.name || firstState || "Start";
+    transformed.splice(graphIndex + 1, 0, `rows ${targetClasses.join(" ")}`, `base ${baseState}`);
   }
-  return [`graph ${type}`, "", ...lines].join("\n");
+  return transformed.join("\n");
 }
 
 function graphTopology(graph) {
@@ -285,6 +422,243 @@ function naturalLayers(graph) {
     ?? breadthFirstLayers(graph.nodes, outgoing, indegree);
 }
 
+function wrapTimelineText(text, maximumCharacters) {
+  if (!text) return [];
+  const output = [];
+  for (const paragraph of String(text).split("\n")) {
+    if (!paragraph.trim()) {
+      if (output.length && output.at(-1) !== "") output.push("");
+      continue;
+    }
+    const words = paragraph.trim().split(/\s+/);
+    let line = "";
+    for (const word of words) {
+      if (!line) {
+        line = word;
+      } else if (`${line} ${word}`.length <= maximumCharacters) {
+        line += ` ${word}`;
+      } else {
+        output.push(line);
+        line = word;
+      }
+    }
+    if (line) output.push(line);
+  }
+  while (output.at(-1) === "") output.pop();
+  return output;
+}
+
+function timelineRouteEdges(graph, positions, geometry) {
+  const scale = geometry.scale;
+  return graph.edges.map((edge) => {
+    const source = positions.get(edge.source);
+    const target = positions.get(edge.target);
+    let points;
+    let labelPoint;
+    if (source.id === target.id) {
+      const start = { x: source.x + source.width, y: source.y + 22 * scale };
+      const end = { x: source.x + source.width, y: source.y + source.height - 22 * scale };
+      const laneX = source.x + source.width + geometry.buffer;
+      points = [start, { x: laneX, y: start.y }, { x: laneX, y: end.y }, end];
+      labelPoint = { x: laneX, y: (start.y + end.y) / 2 };
+    } else if (source.className === target.className) {
+      const forward = target.x > source.x;
+      const start = {
+        x: forward ? source.x + source.width : source.x,
+        y: source.y + source.height / 2,
+      };
+      const end = {
+        x: forward ? target.x : target.x + target.width,
+        y: target.y + target.height / 2,
+      };
+      const blocked = [...positions.values()].some((node) => node.id !== source.id
+        && node.id !== target.id
+        && node.className === source.className
+        && node.x < end.x
+        && node.x + node.width > start.x);
+      const clearRun = forward && start.x < end.x && !blocked;
+      if (clearRun) {
+        const laneX = (start.x + end.x) / 2;
+        points = start.y === end.y
+          ? [start, end]
+          : [start, { x: laneX, y: start.y }, { x: laneX, y: end.y }, end];
+        labelPoint = start.y === end.y
+          ? { x: laneX, y: start.y }
+          : { x: laneX, y: (start.y + end.y) / 2 };
+      } else {
+        const laneY = Math.max(source.y + source.height, target.y + target.height) + 28 * scale;
+        points = [start, { x: start.x - 18 * scale, y: start.y }, { x: start.x - 18 * scale, y: laneY }, { x: end.x + 18 * scale, y: laneY }, { x: end.x + 18 * scale, y: end.y }, end];
+        labelPoint = { x: (start.x + end.x) / 2, y: laneY };
+      }
+    } else {
+      const targetAbove = target.y < source.y;
+      const start = {
+        x: source.x + source.width / 2,
+        y: targetAbove ? source.y : source.y + source.height,
+      };
+      const end = {
+        x: target.x + target.width / 2,
+        y: targetAbove ? target.y + target.height : target.y,
+      };
+      if (Math.abs(start.x - end.x) < 0.01) {
+        points = [start, end];
+        labelPoint = { x: start.x, y: (start.y + end.y) / 2 };
+      } else {
+        const laneY = (start.y + end.y) / 2;
+        points = [start, { x: start.x, y: laneY }, { x: end.x, y: laneY }, end];
+        labelPoint = { x: (start.x + end.x) / 2, y: laneY };
+      }
+    }
+    points = points.filter((point, index) => index === 0 || point.x !== points[index - 1].x || point.y !== points[index - 1].y);
+    return {
+      ...edge,
+      points,
+      start: points[0],
+      end: points.at(-1),
+      labelPoint,
+      arrow: arrowHead(points.at(-2), points.at(-1), scale),
+    };
+  });
+}
+
+function layoutTimelineGraph(graph, geometry) {
+  const scale = geometry.scale;
+  const rowNames = graph.classes.length ? graph.classes : ["timeline"];
+  const nodeWidth = Math.max(244 * scale, geometry.nodeWidth * 1.28);
+  const titleWidth = nodeWidth / scale;
+  const bodyWidth = Math.max(18, Math.floor((titleWidth - 32) / 7.2));
+  const metrics = new Map(graph.nodes.map((node) => {
+    const titleLines = nodeLabelLines(node.name, titleWidth - 8);
+    const bodyLines = wrapTimelineText(node.text, bodyWidth);
+    const titleHeight = titleLines.length * 18;
+    const bodyHeight = bodyLines.length ? 10 + bodyLines.length * 17 : 0;
+    const height = Math.max(88, 28 + titleHeight + bodyHeight) * scale;
+    return [node.id, { titleLines, bodyLines, width: nodeWidth, height }];
+  }));
+  const rows = rowNames.map((name) => graph.nodes.filter((node) => node.className === name));
+  const placedRows = new Set(rows.flat().map((node) => node.id));
+  for (const node of graph.nodes) if (!placedRows.has(node.id)) rows[0].push(node);
+  const rowHeights = rows.map((nodes) => Math.max(88 * scale, ...nodes.map((node) => metrics.get(node.id).height)));
+  const rowGap = Math.max(72 * scale, geometry.rowGap * 0.9);
+  const headerWidth = 118 * scale;
+  const xStart = geometry.margin + headerWidth;
+  const nodeGap = Math.max(76 * scale, geometry.layerGap * 0.48);
+  const rowY = [];
+  let yCursor = geometry.margin;
+  for (let index = rowNames.length - 1; index >= 0; index -= 1) {
+    rowY[index] = yCursor;
+    yCursor += rowHeights[index] + (index ? rowGap : 0);
+  }
+
+  const baseRow = rows[0] || [];
+  const baseId = baseRow.some((node) => node.id === graph.base) ? graph.base : baseRow[0]?.id;
+  const baseById = new Map(baseRow.map((node) => [node.id, node]));
+  const baseOrder = [];
+  const visited = new Set();
+  const queue = baseId ? [baseId] : [];
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const id = queue[cursor];
+    if (visited.has(id) || !baseById.has(id)) continue;
+    visited.add(id);
+    baseOrder.push(baseById.get(id));
+    for (const edge of graph.edges) {
+      if (edge.source === id && baseById.has(edge.target) && !visited.has(edge.target)) queue.push(edge.target);
+    }
+  }
+  for (const node of baseRow) if (!visited.has(node.id)) baseOrder.push(node);
+
+  const positions = new Map();
+  let xCursor = xStart;
+  for (const node of baseOrder) {
+    const metric = metrics.get(node.id);
+    const classIndex = 0;
+    const palette = CLASS_COLUMN_PALETTE[classIndex];
+    positions.set(node.id, {
+      ...node,
+      ...metric,
+      x: xCursor,
+      y: rowY[0] + (rowHeights[0] - metric.height) / 2,
+      classIndex,
+      fill: palette.band,
+      accent: palette.header,
+      ink: palette.ink,
+      isBase: node.id === baseId,
+    });
+    xCursor += metric.width + nodeGap;
+  }
+
+  const baseCenters = new Map(baseOrder.map((node) => {
+    const position = positions.get(node.id);
+    return [node.id, position.x + position.width / 2];
+  }));
+  for (let index = 1; index < rows.length; index += 1) {
+    const palette = CLASS_COLUMN_PALETTE[index % CLASS_COLUMN_PALETTE.length];
+    const preferred = rows[index].map((node, nodeIndex) => {
+      const anchors = [];
+      for (const edge of graph.edges) {
+        if (edge.source === node.id && baseCenters.has(edge.target)) anchors.push(baseCenters.get(edge.target));
+        if (edge.target === node.id && baseCenters.has(edge.source)) anchors.push(baseCenters.get(edge.source));
+      }
+      anchors.sort((left, right) => left - right);
+      const center = anchors.length
+        ? anchors[Math.floor((anchors.length - 1) / 2)]
+        : xStart + nodeIndex * (nodeWidth + nodeGap) + nodeWidth / 2;
+      return { node, center, anchored: anchors.length > 0 };
+    }).sort((left, right) => left.center - right.center || left.node.order - right.node.order);
+    const placed = [];
+    for (const item of preferred) {
+      const metric = metrics.get(item.node.id);
+      let x = Math.max(xStart, item.center - metric.width / 2);
+      for (const previous of placed) {
+        if (x >= previous.x + previous.width + nodeGap) continue;
+        x = previous.x + previous.width + nodeGap;
+      }
+      const position = {
+        ...item.node,
+        ...metric,
+        x,
+        y: rowY[index] + (rowHeights[index] - metric.height) / 2,
+        classIndex: index,
+        fill: palette.band,
+        accent: palette.header,
+        ink: palette.ink,
+        isBase: false,
+        anchored: item.anchored,
+      };
+      positions.set(item.node.id, position);
+      placed.push(position);
+    }
+  }
+
+  const right = Math.max(xStart + nodeWidth, ...[...positions.values()].map((node) => node.x + node.width));
+  const width = Math.max(720 * scale * geometry.horizontalShape, right + geometry.margin);
+  const height = Math.max(420 * scale * geometry.verticalShape, yCursor + geometry.margin);
+  const rowHeaders = rowNames.map((name, index) => {
+    const palette = CLASS_COLUMN_PALETTE[index % CLASS_COLUMN_PALETTE.length];
+    return {
+      className: name,
+      classIndex: index,
+      x: geometry.margin,
+      y: rowY[index],
+      width: headerWidth - 22 * scale,
+      height: rowHeights[index],
+      ...palette,
+    };
+  });
+  return {
+    nodes: positions,
+    edges: timelineRouteEdges(graph, positions, geometry),
+    width,
+    height,
+    scale,
+    options: geometry.options,
+    optimization: null,
+    columnHeaders: [],
+    columnBands: [],
+    rowHeaders,
+  };
+}
+
 export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
   const geometry = layoutGeometry(options);
   if (!graph.nodes.length) {
@@ -298,8 +672,10 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
       optimization: null,
       columnHeaders: [],
       columnBands: [],
+      rowHeaders: [],
     };
   }
+  if (graph.type === "timeline") return layoutTimelineGraph(graph, geometry);
 
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   const { outgoing, indegree } = graphTopology(graph);
@@ -528,6 +904,7 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
     optimization,
     columnHeaders,
     columnBands,
+    rowHeaders: [],
   };
 }
 
@@ -1148,6 +1525,13 @@ export function renderSvg(graph, layout) {
       <line x1="${header.x}" y1="${bottom}" x2="${header.x + header.width}" y2="${bottom}" stroke="${header.ink}" />
     </g>`;
   }).join("\n");
+  const rowHeaders = (layout.rowHeaders || []).map((header) => {
+    const centerY = header.y + header.height / 2;
+    return `<g class="row-header" data-row="${escapeXml(header.className)}">
+      <rect x="${header.x}" y="${centerY - 3 * scale}" width="${12 * scale}" height="${6 * scale}" fill="${header.header}" />
+      <text x="${header.x + 18 * scale}" y="${centerY + 4 * scale}" fill="${header.ink}">${escapeXml(header.className.toUpperCase())}</text>
+    </g>`;
+  }).join("\n");
   const edges = layout.edges.map((edge) => {
     const width = labelWidth(edge.label, scale);
     const path = edge.points
@@ -1163,13 +1547,30 @@ export function renderSvg(graph, layout) {
   }).join("\n");
 
   const nodes = [...layout.nodes.values()].map((node) => {
+    if (graph.type === "timeline") {
+      const titleX = node.x + 15 * scale;
+      const titleY = node.y + 24 * scale;
+      const title = node.titleLines.map((line, index) => `<tspan x="${titleX}"${index ? ` dy="${18 * scale}"` : ""}>${escapeXml(line)}</tspan>`).join("");
+      const bodyY = titleY + node.titleLines.length * 18 * scale + 4 * scale;
+      const body = node.bodyLines.map((line, index) => `<tspan x="${titleX}"${index ? ` dy="${17 * scale}"` : ""}>${line ? escapeXml(line) : "&#160;"}</tspan>`).join("");
+      const base = node.isBase
+        ? `<text class="base-label" x="${node.x + node.width - 14 * scale}" y="${node.y + 23 * scale}">BASE</text>`
+        : "";
+      return `<g class="node timeline-node" data-state="${escapeXml(node.id)}" data-row="${escapeXml(node.className)}" data-base="${node.isBase ? "true" : "false"}">
+        <rect class="node-box" x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" fill="${node.fill}" />
+        <rect class="node-accent" x="${node.x}" y="${node.y}" width="${6 * scale}" height="${node.height}" fill="${node.accent}" />
+        <text class="node-title" x="${titleX}" y="${titleY}">${title}</text>
+        ${body ? `<text class="node-body" x="${titleX}" y="${bodyY}">${body}</text>` : ""}
+        ${base}
+      </g>`;
+    }
     const lines = nodeLabelLines(node.name, node.width / scale);
     const longest = Math.max(...lines.map((line) => line.length));
     const fontSize = Math.max(13 * scale, Math.min(14 * scale, (node.width - 24 * scale) / (longest * 0.58)));
     const centerX = node.x + node.width / 2;
     const firstY = node.y + node.height / 2 + 5 * scale - (lines.length - 1) * 8 * scale;
     const text = lines.map((line, index) => `<tspan x="${centerX}"${index ? ` dy="${17 * scale}"` : ""}>${escapeXml(line)}</tspan>`).join("");
-    return `<g class="node">
+    return `<g class="node" data-state="${escapeXml(node.id)}">
       <rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" />
       <text x="${centerX}" y="${firstY}" style="font-size:${fontSize.toFixed(2)}px">${text}</text>
     </g>`;
@@ -1183,12 +1584,19 @@ export function renderSvg(graph, layout) {
       .edge text { fill: #111; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: ${13 * scale}px; text-anchor: middle; }
       .column-header text { fill: #111; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: ${12 * scale}px; font-weight: 800; letter-spacing: ${1.2 * scale}px; text-anchor: middle; }
       .column-header line { stroke-width: ${1 * scale}; }
-      .node rect { fill: #fff; stroke: #111; stroke-width: ${2 * scale}; }
+      .row-header text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: ${11 * scale}px; font-weight: 800; letter-spacing: ${0.8 * scale}px; }
+      .node:not(.timeline-node) > rect:first-child { fill: #fff; stroke: #111; stroke-width: ${2 * scale}; }
       .node text { fill: #111; font-family: Inter, Arial, sans-serif; font-size: ${14 * scale}px; font-weight: 600; text-anchor: middle; }
+      .timeline-node > .node-box { stroke: #111; stroke-width: ${2 * scale}; }
+      .timeline-node > .node-accent { stroke: none; }
+      .timeline-node .node-title { font-size: ${14 * scale}px; font-weight: 750; text-anchor: start; }
+      .timeline-node .node-body { font-size: ${12.5 * scale}px; font-weight: 400; text-anchor: start; }
+      .timeline-node .base-label { fill: #555; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: ${9.5 * scale}px; font-weight: 800; letter-spacing: ${0.8 * scale}px; text-anchor: end; }
     </style>
     <rect width="100%" height="100%" fill="#fff" />
     ${bands}
     ${headers}
+    ${rowHeaders}
     ${edges}
     ${nodes}
   </svg>`;
@@ -1263,6 +1671,17 @@ export function buildPdf(graph, layout) {
     commands.push("0 0 0 RG", "0 0 0 rg");
   }
 
+  for (const header of layout.rowHeaders || []) {
+    const centerY = header.y + header.height / 2;
+    const swatch = point({ x: header.x, y: centerY + 3 * layout.scale });
+    const label = point({ x: header.x + 18 * layout.scale, y: centerY + 4 * layout.scale });
+    const fontSize = Math.max(7, Math.min(9, 10 * scale));
+    commands.push(`${pdfColor(header.header)} rg ${swatch.x.toFixed(3)} ${swatch.y.toFixed(3)} ${(12 * layout.scale * scale).toFixed(3)} ${(6 * layout.scale * scale).toFixed(3)} re f`);
+    commands.push(`${pdfColor(header.ink)} rg`);
+    commands.push(`BT /F2 ${fontSize.toFixed(3)} Tf ${label.x.toFixed(3)} ${label.y.toFixed(3)} Td (${pdfEscape(header.className.toUpperCase())}) Tj ET`);
+    commands.push("0 0 0 RG", "0 0 0 rg");
+  }
+
   for (const edge of layout.edges) {
     const path = edge.points.map(point);
     commands.push(`${Math.max(0.8, 1.4 * scale).toFixed(3)} w`);
@@ -1283,6 +1702,31 @@ export function buildPdf(graph, layout) {
   for (const node of layout.nodes.values()) {
     const bottomLeft = point({ x: node.x, y: node.y + node.height });
     commands.push(`${Math.max(1, 1.8 * scale).toFixed(3)} w`);
+    if (graph.type === "timeline") {
+      commands.push(`${pdfColor(node.fill)} rg 0 0 0 RG ${bottomLeft.x.toFixed(3)} ${bottomLeft.y.toFixed(3)} ${(node.width * scale).toFixed(3)} ${(node.height * scale).toFixed(3)} re B`);
+      commands.push(`${pdfColor(node.accent)} rg ${bottomLeft.x.toFixed(3)} ${bottomLeft.y.toFixed(3)} ${(6 * layout.scale * scale).toFixed(3)} ${(node.height * scale).toFixed(3)} re f`);
+      commands.push("0 0 0 rg", "0 0 0 RG");
+      const titleSize = Math.max(8, Math.min(11, 13 * scale));
+      const bodySize = Math.max(7, Math.min(10, 11.5 * scale));
+      node.titleLines.forEach((line, index) => {
+        const position = point({ x: node.x + 15 * layout.scale, y: node.y + (24 + index * 18) * layout.scale });
+        commands.push(`BT /F2 ${titleSize.toFixed(3)} Tf ${position.x.toFixed(3)} ${position.y.toFixed(3)} Td (${pdfEscape(line)}) Tj ET`);
+      });
+      const bodyTop = 24 + node.titleLines.length * 18 + 4;
+      node.bodyLines.forEach((line, index) => {
+        if (!line) return;
+        const position = point({ x: node.x + 15 * layout.scale, y: node.y + (bodyTop + index * 17) * layout.scale });
+        commands.push(`BT /F1 ${bodySize.toFixed(3)} Tf ${position.x.toFixed(3)} ${position.y.toFixed(3)} Td (${pdfEscape(line)}) Tj ET`);
+      });
+      if (node.isBase) {
+        const baseSize = Math.max(6, Math.min(8, 8.5 * scale));
+        const position = point({ x: node.x + node.width - 40 * layout.scale, y: node.y + 23 * layout.scale });
+        commands.push("0.33 0.33 0.33 rg");
+        commands.push(`BT /F2 ${baseSize.toFixed(3)} Tf ${position.x.toFixed(3)} ${position.y.toFixed(3)} Td (BASE) Tj ET`);
+        commands.push("0 0 0 rg");
+      }
+      continue;
+    }
     commands.push(`${bottomLeft.x.toFixed(3)} ${bottomLeft.y.toFixed(3)} ${(node.width * scale).toFixed(3)} ${(node.height * scale).toFixed(3)} re S`);
     const center = point({ x: node.x + node.width / 2, y: node.y + node.height / 2 });
     const fontSize = Math.max(8, Math.min(12, 14 * scale));

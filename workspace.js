@@ -99,14 +99,15 @@ const bundledSources = await Promise.all([
   ["file-rubylith", "RUBYLITH BILL OF MATERIALS.boxline", "./benchmarks/rubylith-bill-of-materials.boxline"],
   ["file-firs-temperate", "FIRS 4 TEMPERATE.boxline", "./examples/firs-4-temperate.boxline"],
   ["file-firs-steeltown", "FIRS 4 STEELTOWN.boxline", "./examples/firs-4-steeltown.boxline"],
+  ["file-product-timeline", "PRODUCT TIMELINE.boxline", "./examples/product-timeline.boxline"],
 ].map(async ([id, name, url]) => {
   const content = await fetch(url)
     .then((response) => response.ok ? response.text() : "")
     .catch(() => "");
   return { id, name, content };
 }));
-const [rubylith, ...firsExamples] = bundledSources;
-const defaultFiles = createDefaultFiles(EXAMPLE_SOURCE, rubylith.content, firsExamples.filter((file) => file.content));
+const [rubylith, ...bundledExamples] = bundledSources;
+const defaultFiles = createDefaultFiles(EXAMPLE_SOURCE, rubylith.content, bundledExamples.filter((file) => file.content));
 
 let model = {
   files: defaultFiles,
@@ -230,7 +231,7 @@ function saveNow(announce = false) {
   window.clearTimeout(saveTimer);
   saveTimer = 0;
   const payload = {
-    version: 4,
+    version: 5,
     savedAt: new Date().toISOString(),
     model,
     activeWindowId,
@@ -278,14 +279,15 @@ function restore() {
     };
     migrateGraphSources(model.files);
   }
-  if (Number(payload.version) < 3) addMissingBundledExamples(model.files, firsExamples.filter((file) => file.content));
+  if (Number(payload.version) < 3) addMissingBundledExamples(model.files, bundledExamples.filter((file) => file.content));
   if (Number(payload.version) < 4) {
     updateBundledExamples(
       model.files,
-      firsExamples.filter((file) => file.content),
+      bundledExamples.filter((file) => file.content),
       (existing, candidate) => sourceFingerprint(existing.content) === LEGACY_FIRS_FINGERPRINTS[candidate.id],
     );
   }
+  if (Number(payload.version) < 5) addMissingBundledExamples(model.files, bundledExamples.filter((file) => file.content));
   validActiveFile();
   if (findNode(model.files, model.currentFolderId)?.type !== "folder") model.currentFolderId = "root";
   windows = normalizeWindowState(payload.windows);
@@ -612,7 +614,9 @@ function updateCompilation(source) {
     const stateSyntax = editorWindow.querySelector("[data-editor-state-syntax]");
     const lines = source.split(/\r?\n/).length;
     editorWindow.querySelector("[data-editor-lines]").textContent = `${lines} LINE${lines === 1 ? "" : "S"}`;
-    stateSyntax.textContent = graph.type === "classified" ? "state Name [class]:" : "state Name:";
+    stateSyntax.textContent = graph.type === "classified"
+      ? "state Name [class]:"
+      : graph.type === "timeline" ? "state Name [row]:" : "state Name:";
     issues.replaceChildren();
     for (const error of graph.errors) {
       const item = document.createElement("button");
@@ -904,6 +908,8 @@ function renderGraph() {
     const swaps = layout.optimization.accepted;
     const passes = layout.optimization.passes;
     mode.textContent = `${graph.type.toUpperCase()} · ${swaps} ${swaps === 1 ? "SWAP" : "SWAPS"} · ${passes} ${passes === 1 ? "PASS" : "PASSES"}`;
+  } else if (graph.type === "timeline") {
+    mode.textContent = `TIMELINE · ${graph.classes.length} ${graph.classes.length === 1 ? "ROW" : "ROWS"} · BASE ${graph.base || "UNSET"}`;
   } else {
     mode.textContent = "DIRECTED LAYOUT · CTRL+SCROLL ZOOM";
   }

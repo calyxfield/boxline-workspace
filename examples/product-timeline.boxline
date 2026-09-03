@@ -1,0 +1,42 @@
+graph timeline
+rows timeline context detail
+base Discovery
+
+state Discovery [timeline]:
+  text:
+    Interview the people with the problem and name the assumption most likely to kill the project.
+  next -> Prototype
+
+state Prototype [timeline]:
+  text:
+    Build the smallest complete interaction that can test the central claim with real users.
+  next -> Pilot
+
+state Pilot [timeline]:
+  text:
+    Run the process at limited scale and measure failures, recovery time, and operator load.
+  next -> Release
+
+state Release [timeline]:
+  text:
+    Expand only after the pilot survives its acceptance criteria and the support path is staffed.
+
+state Problem frame [context]:
+  text:
+    The project exists to shorten a handoff that currently loses decisions between teams.
+  explains -> Discovery
+
+state Test cohort [context]:
+  text:
+    Five operators use the prototype on representative work before the implementation hardens.
+  explains -> Prototype
+
+state Acceptance gate [context]:
+  text:
+    The pilot must complete twenty runs without an unrecoverable handoff or silent data loss.
+  governs -> Pilot
+
+state Security review [detail]:
+  text:
+    Threat modeling, access review, and incident ownership must close before the release decision.
+  blocks -> Release

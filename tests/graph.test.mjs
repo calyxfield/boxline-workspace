@@ -3,9 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   GRAPH_TYPES,
+  buildPdf,
   layoutGraph,
   normalizeLayoutOptions,
   parseGraph,
+  renderSvg,
   setGraphType,
 } from "../graph.mjs";
 
@@ -116,6 +118,8 @@ test("graph type declaration is required and selects the layout engine", () => {
   for (const type of GRAPH_TYPES) {
     const body = type === "classified"
       ? "columns source result\n\nstate Input [source]:\n  next -> Output\nstate Output [result]:"
+      : type === "timeline"
+        ? "rows timeline context\nbase Input\n\nstate Input [timeline]:\n  next -> Output\nstate Output [timeline]:"
       : "state Input:\n  next -> Output\nstate Output:";
     const graph = parseGraph(`graph ${type}\n\n${body}`);
     assert.equal(graph.type, type);
@@ -123,6 +127,78 @@ test("graph type declaration is required and selects the layout engine", () => {
     assert.equal(graph.nodes.length, 2);
     assert.equal(graph.edges.length, 1);
   }
+});
+
+test("timeline graphs require unique rows, a first-row base, and support independent text", () => {
+  const source = `graph timeline
+rows timeline context detail
+base Start
+
+state Start [timeline]:
+  text:
+    Begin with a deliberately long description that wraps independently of the state name.
+    Keep its second source line too.
+  next -> Review
+state Review [timeline]:
+  text: Make the decision visible.
+state Background [context]:
+  explains -> Review
+state Approval [detail]:
+  gates -> Start`;
+  const graph = parseGraph(source);
+  assert.equal(graph.errors.length, 0);
+  assert.equal(graph.base, "Start");
+  assert.deepEqual(graph.classes, ["timeline", "context", "detail"]);
+  assert.match(graph.nodes[0].text, /wraps independently/);
+  assert.match(graph.nodes[0].text, /second source line/);
+  assert.equal(graph.nodes[1].text, "Make the decision visible.");
+
+  assert.match(parseGraph("graph timeline\nbase Start\nstate Start [timeline]:").errors[0].message, /rows declaration/);
+  assert.ok(parseGraph("graph timeline\nrows timeline context\nstate Start [timeline]:").errors.some((error) => /base declaration/.test(error.message)));
+  assert.ok(parseGraph("graph timeline\nrows timeline timeline\nbase Start\nstate Start [timeline]:").errors.some((error) => /unique/.test(error.message)));
+  assert.ok(parseGraph("graph timeline\nrows timeline context\nbase Note\nstate Start [timeline]:\nstate Note [context]:").errors.some((error) => /first row/.test(error.message)));
+  assert.ok(parseGraph("graph timeline\nrows timeline context\nbase Missing\nstate Start [timeline]:").errors.some((error) => /has no declaration/.test(error.message)));
+  assert.doesNotThrow(() => layoutGraph(parseGraph("graph timeline\nrows timeline context\nbase Start\nstate Start [timeline]:\n  next -> Note\nstate Note [unknown]:")));
+});
+
+test("timeline layout follows the base row and aligns connected context above it", () => {
+  const graph = parseGraph(`graph timeline
+rows timeline context detail
+base Start
+
+state Finish [timeline]:
+state Start [timeline]:
+  text: Establish the first event with enough body copy to grow the box.
+  next -> Review
+state Review [timeline]:
+  next -> Finish
+state Why [context]:
+  explains -> Review
+state Gate [detail]:
+  blocks -> Finish`);
+  const layout = layoutGraph(graph);
+  const centerX = (id) => {
+    const node = layout.nodes.get(id);
+    return node.x + node.width / 2;
+  };
+
+  assert.ok(layout.nodes.get("Start").x < layout.nodes.get("Review").x);
+  assert.ok(layout.nodes.get("Review").x < layout.nodes.get("Finish").x);
+  assert.equal(centerX("Why"), centerX("Review"));
+  assert.equal(centerX("Gate"), centerX("Finish"));
+  assert.ok(layout.nodes.get("Gate").y < layout.nodes.get("Why").y);
+  assert.ok(layout.nodes.get("Why").y < layout.nodes.get("Start").y);
+  assert.equal(layout.nodes.get("Start").isBase, true);
+  assert.deepEqual(layout.rowHeaders.map((header) => header.className), ["timeline", "context", "detail"]);
+  assert.equal(layout.columnBands.length, 0);
+  assert.equal(new Set([...layout.nodes.values()].map((node) => node.fill)).size, 3);
+
+  const svg = renderSvg(graph, layout);
+  assert.match(svg, /class="node timeline-node"/);
+  assert.match(svg, /data-base="true"/);
+  assert.match(svg, /Establish the first event/);
+  assert.match(svg, /class="row-header"/);
+  assert.equal(Buffer.from(buildPdf(graph, layout)).subarray(0, 8).toString(), "%PDF-1.4");
 });
 
 test("classified graphs declare their column cycle and each state's class", () => {
@@ -195,6 +271,12 @@ test("graph type can be changed without touching the shared grammar", () => {
   assert.match(classified, /state Output \[class-b\]:/);
   assert.equal(parseGraph(classified).errors.length, 0);
   assert.equal(setGraphType(classified, "directed"), directed);
+  const timeline = setGraphType(directed, "timeline");
+  assert.match(timeline, /^graph timeline\nrows timeline context\nbase Input/m);
+  assert.match(timeline, /state Input \[timeline\]:/);
+  assert.match(timeline, /state Output \[timeline\]:/);
+  assert.equal(parseGraph(timeline).errors.length, 0);
+  assert.equal(setGraphType(timeline, "directed"), directed);
   assert.equal(setGraphType("state Input:", "directed"), "graph directed\n\nstate Input:");
   assert.throws(() => setGraphType(directed, "radial"), /Unsupported graph type/);
 });

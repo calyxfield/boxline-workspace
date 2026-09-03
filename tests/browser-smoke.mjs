@@ -80,6 +80,65 @@ try {
   assert.doesNotMatch(await page.evaluate(() => window.boxlineEditor.getSource()), /^columns /m);
   assert.equal(await page.locator("[data-graph-column-strip]").isVisible(), false);
 
+  await page.locator("[data-graph-type]").selectOption("timeline");
+  assert.match(await page.evaluate(() => window.boxlineEditor.getSource()), /^graph timeline\nrows timeline context\nbase Pump/);
+  assert.equal((await page.evaluate(() => window.__boxlineWorkspace.getState().compiled)).type, "timeline");
+  const timelineSource = `graph timeline
+rows timeline context detail
+base Start
+
+state Finish [timeline]:
+  text: Release the complete process after the measured gate passes.
+state Start [timeline]:
+  text:
+    Name the problem, the operator, and the riskiest assumption before building anything.
+  next -> Review
+state Review [timeline]:
+  text: Test one complete pass with representative work.
+  next -> Finish
+state Evidence [context]:
+  text: Five operators complete the critical handoff without coaching.
+  explains -> Review
+state Approval [detail]:
+  text: Security and support owners accept the release path.
+  gates -> Finish`;
+  await page.evaluate((value) => window.boxlineEditor.setSource(value), timelineSource);
+  assert.equal(await page.locator("[data-graph-type]").inputValue(), "timeline");
+  assert.match(await page.locator("[data-graph-layout-mode]").textContent(), /^TIMELINE · 3 ROWS · BASE Start$/);
+  assert.equal(await page.locator("[data-graph-preview] .row-header").count(), 3);
+  assert.equal(await page.locator("[data-graph-preview] .timeline-node").count(), 5);
+  assert.equal(await page.locator('[data-graph-preview] .timeline-node[data-base="true"]').count(), 1);
+  assert.match(await page.locator('[data-state="Start"] .node-body').textContent(), /riskiestassumption/);
+  const timelineGeometry = await page.evaluate(() => {
+    const box = (state) => {
+      const group = document.querySelector(`[data-graph-preview] [data-state="${state}"]`);
+      const rect = group.querySelector(".node-box");
+      return {
+        x: Number(rect.getAttribute("x")),
+        y: Number(rect.getAttribute("y")),
+        width: Number(rect.getAttribute("width")),
+        height: Number(rect.getAttribute("height")),
+        fill: rect.getAttribute("fill"),
+      };
+    };
+    return { start: box("Start"), review: box("Review"), finish: box("Finish"), evidence: box("Evidence"), approval: box("Approval") };
+  });
+  const centerX = (box) => box.x + box.width / 2;
+  const centerY = (box) => box.y + box.height / 2;
+  assert.ok(timelineGeometry.start.x < timelineGeometry.review.x);
+  assert.ok(timelineGeometry.review.x < timelineGeometry.finish.x);
+  assert.equal(centerY(timelineGeometry.start), centerY(timelineGeometry.review));
+  assert.equal(centerX(timelineGeometry.evidence), centerX(timelineGeometry.review));
+  assert.equal(centerX(timelineGeometry.approval), centerX(timelineGeometry.finish));
+  assert.ok(timelineGeometry.evidence.y < timelineGeometry.start.y);
+  assert.ok(timelineGeometry.approval.y < timelineGeometry.evidence.y);
+  assert.notEqual(timelineGeometry.start.fill, timelineGeometry.evidence.fill);
+  await page.screenshot({ path: join(artifacts.pathname, "timeline-desktop.png") });
+  await page.locator("[data-graph-type]").selectOption("optimized");
+  assert.doesNotMatch(await page.evaluate(() => window.boxlineEditor.getSource()), /^(?:rows|base) /m);
+  assert.match(await page.evaluate(() => window.boxlineEditor.getSource()), /text:\n    Name the problem/);
+  await page.evaluate((value) => window.boxlineEditor.setSource(value), "graph optimized\n\nstate Input:\n  next -> Output\nstate Output:");
+
   const zoomWidthBefore = await page.locator("[data-graph-preview] svg").evaluate((svg) => svg.getBoundingClientRect().width);
   await page.locator('[data-graph-action="zoom-in"]').click();
   assert.equal(await page.locator('[data-graph-action="zoom-reset"]').textContent(), "110%");
@@ -179,6 +238,7 @@ try {
   await examplesFolder.dblclick();
   assert.equal(await page.locator('.file-item[data-node-id="file-firs-temperate"]').count(), 1);
   assert.equal(await page.locator('.file-item[data-node-id="file-firs-steeltown"]').count(), 1);
+  assert.equal(await page.locator('.file-item[data-node-id="file-product-timeline"]').count(), 1);
   await page.locator('.file-item[data-node-id="file-firs-temperate"]').dblclick();
   assert.match(await page.locator('[data-window="editor"] .window-title').textContent(), /FIRS 4 TEMPERATE\.boxline/);
   assert.equal(await page.locator("[data-graph-status]").textContent(), "31 STATES · 35 ARROWS");
@@ -269,6 +329,7 @@ try {
     persistedFile: "DEPENDENCY TEST.boxline",
     screenshots: [
       "artifacts/desktop.png",
+      "artifacts/timeline-desktop.png",
       "artifacts/layout-window-desktop.png",
       "artifacts/mobile.png",
       "artifacts/layout-window-mobile.png",
