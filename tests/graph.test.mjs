@@ -120,6 +120,8 @@ test("graph type declaration is required and selects the layout engine", () => {
       ? "columns source result\n\nstate Input [source]:\n  next -> Output\nstate Output [result]:"
       : type === "timeline"
         ? "rows timeline context\nbase Input\n\nstate Input [timeline]:\n  next -> Output\nstate Output [timeline]:"
+        : type === "nested"
+          ? "state Input:\n  next -> Output\nstate Output:"
       : "state Input:\n  next -> Output\nstate Output:";
     const graph = parseGraph(`graph ${type}\n\n${body}`);
     assert.equal(graph.type, type);
@@ -127,6 +129,89 @@ test("graph type declaration is required and selects the layout engine", () => {
     assert.equal(graph.nodes.length, 2);
     assert.equal(graph.edges.length, 1);
   }
+});
+
+test("nested graphs parse local inner graphs and boundary entry mappings", () => {
+  const graph = parseGraph(`graph nested
+
+state Intake:
+    ready -> Processing
+state Processing:
+    complete -> Shipping
+        state Validate:
+            valid -> Assemble
+        state Assemble:
+        Intake -> Validate
+state Shipping:`);
+
+  assert.equal(graph.errors.length, 0);
+  assert.deepEqual(graph.nodes.map((node) => node.name), ["Intake", "Processing", "Shipping"]);
+  assert.deepEqual(graph.nodes[1].innerGraph.nodes.map((node) => node.name), ["Validate", "Assemble"]);
+  assert.deepEqual(graph.nodes[1].innerGraph.edges.map((edge) => [edge.label, edge.source, edge.target]), [
+    ["valid", "Processing::Validate", "Processing::Assemble"],
+  ]);
+  assert.equal(graph.edges[0].entryTarget, "Processing::Validate");
+  assert.deepEqual(graph.boundaryLinks, [{
+    container: "Processing",
+    source: "Intake",
+    target: "Processing::Validate",
+    line: 10,
+  }]);
+
+  const duplicateLocalNames = parseGraph(`graph nested
+state A:
+        state Same:
+state B:
+        state Same:`);
+  assert.equal(duplicateLocalNames.errors.length, 0);
+  assert.equal(duplicateLocalNames.nodes[0].innerGraph.nodes[0].id, "A::Same");
+  assert.equal(duplicateLocalNames.nodes[1].innerGraph.nodes[0].id, "B::Same");
+
+  assert.ok(parseGraph(`graph nested
+state A:
+    next -> B
+state B:
+        state Inside:
+        Missing -> Inside`).errors.some((error) => /Boundary source/.test(error.message)));
+  assert.ok(parseGraph(`graph nested
+state A:
+    next -> B
+state B:
+        state Inside:
+        A -> Missing`).errors.some((error) => /Boundary target/.test(error.message)));
+});
+
+test("nested layout draws inner graphs inside containers and continues incoming arrows", () => {
+  const graph = parseGraph(`graph nested
+
+state Intake:
+    ready -> Processing
+state Processing:
+    complete -> Shipping
+        state Validate:
+            valid -> Assemble
+        state Assemble:
+        Intake -> Validate
+state Shipping:`);
+  const layout = layoutGraph(graph);
+  const container = layout.nodes.get("Processing");
+  const inner = layout.innerGraphs.get("Processing");
+  const entry = inner.nodes.get("Processing::Validate");
+
+  assert.equal(container.hasInner, true);
+  assert.ok(container.width > layout.nodes.get("Intake").width);
+  assert.ok(entry.x > container.x && entry.x + entry.width < container.x + container.width);
+  assert.ok(entry.y > container.y + container.headerHeight && entry.y + entry.height < container.y + container.height);
+  assert.deepEqual(layout.edges[0].end, { x: entry.x + entry.width / 2, y: entry.y });
+  assert.equal(inner.edges.length, 1);
+
+  const svg = renderSvg(graph, layout);
+  assert.match(svg, /class="node nested-container"/);
+  assert.match(svg, /class="node nested-node"/);
+  assert.match(svg, /data-inner-state="Validate"/);
+  assert.match(svg, /class="edge outer-edge"/);
+  assert.match(svg, /class="edge inner-edge"/);
+  assert.equal(Buffer.from(buildPdf(graph, layout)).subarray(0, 8).toString(), "%PDF-1.4");
 });
 
 test("timeline graphs require unique rows, a first-row base, and support independent text", () => {
@@ -313,6 +398,16 @@ test("graph type can be changed without touching the shared grammar", () => {
   assert.match(timeline, /state Output \[timeline\]:/);
   assert.equal(parseGraph(timeline).errors.length, 0);
   assert.equal(setGraphType(timeline, "directed"), directed);
+  const nested = setGraphType(directed, "nested");
+  assert.equal(nested, directed.replace("graph directed", "graph nested"));
+  assert.equal(parseGraph(nested).errors.length, 0);
+  const nestedWithInner = `graph nested
+
+state Input:
+  next -> Output
+state Output:
+    state Inside:`;
+  assert.equal(setGraphType(nestedWithInner, "directed"), directed);
   assert.equal(setGraphType("state Input:", "directed"), "graph directed\n\nstate Input:");
   assert.throws(() => setGraphType(directed, "radial"), /Unsupported graph type/);
 });

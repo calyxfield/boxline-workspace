@@ -1,0 +1,27 @@
+graph nested
+
+# One indent makes an outer arrow.
+# Two indents declare states inside a container.
+# Three indents make arrows inside that container.
+# At two indents, Outer -> Inner continues an incoming outer arrow to an inner state.
+
+state Intake:
+    accepted -> Production
+
+state Production:
+    released -> Shipping
+        state Inspect:
+            approved -> Assemble
+        state Assemble:
+            packed -> Dispatch
+        state Dispatch:
+        Intake -> Inspect
+
+state Shipping:
+    delivered -> Complete
+        state Label:
+            scanned -> Load
+        state Load:
+        Production -> Label
+
+state Complete:

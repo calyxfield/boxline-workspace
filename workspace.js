@@ -100,6 +100,7 @@ const bundledSources = await Promise.all([
   ["file-firs-temperate", "FIRS 4 TEMPERATE.boxline", "./examples/firs-4-temperate.boxline"],
   ["file-firs-steeltown", "FIRS 4 STEELTOWN.boxline", "./examples/firs-4-steeltown.boxline"],
   ["file-product-timeline", "PRODUCT TIMELINE.boxline", "./examples/product-timeline.boxline"],
+  ["file-nested-release", "NESTED RELEASE FLOW.boxline", "./examples/nested-release-flow.boxline"],
 ].map(async ([id, name, url]) => {
   const content = await fetch(url)
     .then((response) => response.ok ? response.text() : "")
@@ -616,7 +617,8 @@ function updateCompilation(source) {
     editorWindow.querySelector("[data-editor-lines]").textContent = `${lines} LINE${lines === 1 ? "" : "S"}`;
     stateSyntax.textContent = graph.type === "classified"
       ? "state Name [class]:"
-      : graph.type === "timeline" ? "state Name [row]:" : "state Name:";
+      : graph.type === "timeline" ? "state Name [row]:"
+        : graph.type === "nested" ? "state Container:" : "state Name:";
     issues.replaceChildren();
     for (const error of graph.errors) {
       const item = document.createElement("button");
@@ -910,6 +912,10 @@ function renderGraph() {
     mode.textContent = `${graph.type.toUpperCase()} · ${swaps} ${swaps === 1 ? "SWAP" : "SWAPS"} · ${passes} ${passes === 1 ? "PASS" : "PASSES"}`;
   } else if (graph.type === "timeline") {
     mode.textContent = `TIMELINE · ${graph.classes.length} ${graph.classes.length === 1 ? "ROW" : "ROWS"} · BASE ${graph.base || "UNSET"}`;
+  } else if (graph.type === "nested") {
+    const containers = graph.nodes.filter((node) => node.innerGraph?.nodes.length).length;
+    const innerStates = graph.nodes.reduce((total, node) => total + (node.innerGraph?.nodes.length || 0), 0);
+    mode.textContent = `NESTED · ${containers} ${containers === 1 ? "CONTAINER" : "CONTAINERS"} · ${innerStates} INNER ${innerStates === 1 ? "STATE" : "STATES"}`;
   } else {
     mode.textContent = "DIRECTED LAYOUT · CTRL+SCROLL ZOOM";
   }
@@ -920,7 +926,10 @@ function renderGraph() {
     status.textContent = "WAITING FOR A STATE";
     status.dataset.state = "empty";
   } else {
-    status.textContent = `${graph.nodes.length} ${graph.nodes.length === 1 ? "STATE" : "STATES"} · ${graph.edges.length} ${graph.edges.length === 1 ? "ARROW" : "ARROWS"}`;
+    const innerStates = graph.type === "nested"
+      ? graph.nodes.reduce((total, node) => total + (node.innerGraph?.nodes.length || 0), 0)
+      : 0;
+    status.textContent = `${graph.nodes.length} ${graph.nodes.length === 1 ? "STATE" : "STATES"} · ${graph.edges.length} ${graph.edges.length === 1 ? "ARROW" : "ARROWS"}${innerStates ? ` · ${innerStates} INNER ${innerStates === 1 ? "STATE" : "STATES"}` : ""}`;
     status.dataset.state = "ready";
   }
   if (graph.nodes.length) {

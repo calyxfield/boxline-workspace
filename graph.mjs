@@ -21,7 +21,7 @@ export const DEFAULT_LAYOUT_OPTIONS = Object.freeze({
   buffer: 32,
 });
 
-export const GRAPH_TYPES = Object.freeze(["directed", "optimized", "classified", "timeline"]);
+export const GRAPH_TYPES = Object.freeze(["directed", "optimized", "classified", "timeline", "nested"]);
 
 function clamp(value, minimum, maximum, fallback) {
   const numeric = Number(value);
@@ -81,6 +81,193 @@ function issue(line, message) {
   return { line, message };
 }
 
+function indentation(raw) {
+  return (raw.match(/^[ \t]*/)?.[0] || "").replaceAll("\t", "    ").length;
+}
+
+function parseNestedGraph(lines, firstContentIndex) {
+  const nodes = [];
+  const pendingEdges = [];
+  const pendingBoundaryLinks = [];
+  const errors = [];
+  const names = new Map();
+  const blocks = new Map();
+  let current = null;
+
+  for (let index = firstContentIndex + 1; index < lines.length; index += 1) {
+    const raw = lines[index];
+    const line = index + 1;
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const indent = indentation(raw);
+    if (!indent) {
+      const declaration = trimmed.match(/^state\s+(.+?)\s*:\s*$/i);
+      if (!declaration) {
+        errors.push(issue(line, 'Expected a top-level `state Name:` declaration'));
+        current = null;
+        continue;
+      }
+      const name = declaration[1].trim();
+      if (!name || name.includes("->")) {
+        errors.push(issue(line, "State names cannot be empty or contain ->"));
+        current = null;
+        continue;
+      }
+      if (names.has(name)) {
+        errors.push(issue(line, `State "${name}" was already declared on line ${names.get(name).line}`));
+        current = names.get(name);
+        continue;
+      }
+      current = {
+        id: name,
+        name,
+        className: null,
+        text: "",
+        line,
+        order: nodes.length,
+        innerGraph: { type: "directed", classes: [], base: null, nodes: [], edges: [], errors: [] },
+      };
+      names.set(name, current);
+      nodes.push(current);
+      blocks.set(current.id, []);
+      continue;
+    }
+    if (!current) {
+      errors.push(issue(line, "Indented nested syntax must appear below a top-level state"));
+      continue;
+    }
+    blocks.get(current.id).push({ raw, trimmed, indent, line });
+  }
+
+  for (const outer of nodes) {
+    const entries = blocks.get(outer.id);
+    const innerStateEntries = entries.filter((entry) => /^state\s+.+?\s*:\s*$/i.test(entry.trimmed));
+    const innerIndent = innerStateEntries.length
+      ? Math.min(...innerStateEntries.map((entry) => entry.indent))
+      : null;
+    const innerNames = new Map();
+    const pendingInnerEdges = [];
+    let currentInner = null;
+
+    for (const entry of entries) {
+      const declaration = entry.trimmed.match(/^state\s+(.+?)\s*:\s*$/i);
+      if (declaration) {
+        if (entry.indent !== innerIndent) {
+          errors.push(issue(entry.line, "Inner state declarations must share one indentation level"));
+          currentInner = null;
+          continue;
+        }
+        const name = declaration[1].trim();
+        if (!name || name.includes("->")) {
+          errors.push(issue(entry.line, "State names cannot be empty or contain ->"));
+          currentInner = null;
+          continue;
+        }
+        if (innerNames.has(name)) {
+          errors.push(issue(entry.line, `Inner state "${name}" was already declared on line ${innerNames.get(name).line}`));
+          currentInner = innerNames.get(name);
+          continue;
+        }
+        currentInner = {
+          id: `${outer.id}::${name}`,
+          name,
+          className: null,
+          text: "",
+          line: entry.line,
+          order: outer.innerGraph.nodes.length,
+          container: outer.id,
+        };
+        innerNames.set(name, currentInner);
+        outer.innerGraph.nodes.push(currentInner);
+        continue;
+      }
+
+      const arrow = entry.trimmed.match(/^(.+?)\s*->\s*(.+?)\s*$/);
+      if (!arrow) {
+        errors.push(issue(entry.line, 'Expected `label -> State`, `state Inner:`, or `Outer -> Inner`'));
+        continue;
+      }
+      const left = arrow[1].trim();
+      const right = arrow[2].trim();
+      if (!left || !right) {
+        errors.push(issue(entry.line, "Arrows need both sides of ->"));
+        continue;
+      }
+
+      if (innerIndent === null || entry.indent < innerIndent) {
+        pendingEdges.push({
+          id: `edge-${pendingEdges.length}`,
+          source: outer.id,
+          target: right,
+          label: left,
+          line: entry.line,
+          order: pendingEdges.length,
+        });
+      } else if (entry.indent === innerIndent) {
+        pendingBoundaryLinks.push({ container: outer.id, source: left, target: right, line: entry.line });
+      } else if (!currentInner) {
+        errors.push(issue(entry.line, "An inner arrow must appear below an inner state declaration"));
+      } else {
+        pendingInnerEdges.push({
+          id: `${outer.id}::edge-${pendingInnerEdges.length}`,
+          source: currentInner.id,
+          target: right,
+          label: left,
+          line: entry.line,
+          order: pendingInnerEdges.length,
+        });
+      }
+    }
+
+    outer.innerGraph.edges = pendingInnerEdges.filter((edge) => {
+      const target = innerNames.get(edge.target);
+      if (target) {
+        edge.target = target.id;
+        return true;
+      }
+      errors.push(issue(edge.line, `Inner target state "${edge.target}" has no declaration inside "${outer.name}"`));
+      return false;
+    });
+  }
+
+  const edges = pendingEdges.filter((edge) => {
+    if (names.has(edge.target)) return true;
+    errors.push(issue(edge.line, `Target state "${edge.target}" has no declaration`));
+    return false;
+  });
+  const boundaryLinks = [];
+  for (const link of pendingBoundaryLinks) {
+    const container = names.get(link.container);
+    const source = names.get(link.source);
+    const target = container?.innerGraph.nodes.find((node) => node.name === link.target);
+    if (!source) {
+      errors.push(issue(link.line, `Boundary source state "${link.source}" has no top-level declaration`));
+      continue;
+    }
+    if (!target) {
+      errors.push(issue(link.line, `Boundary target state "${link.target}" is not inside "${link.container}"`));
+      continue;
+    }
+    const incoming = edges.filter((edge) => edge.source === source.id && edge.target === container.id);
+    if (!incoming.length) {
+      errors.push(issue(link.line, `State "${source.name}" has no arrow into container "${container.name}"`));
+      continue;
+    }
+    for (const edge of incoming) {
+      if (edge.entryTarget && edge.entryTarget !== target.id) {
+        errors.push(issue(link.line, `The arrow from "${source.name}" into "${container.name}" already enters another inner state`));
+        continue;
+      }
+      edge.entryTarget = target.id;
+      edge.boundaryLine = link.line;
+    }
+    boundaryLinks.push({ ...link, source: source.id, target: target.id });
+  }
+
+  errors.sort((left, right) => left.line - right.line);
+  return { type: "nested", classes: [], base: null, nodes, edges, boundaryLinks, errors };
+}
+
 export function parseGraph(source) {
   const nodes = [];
   const pendingEdges = [];
@@ -102,7 +289,7 @@ export function parseGraph(source) {
   const firstContent = firstContentIndex >= 0 ? lines[firstContentIndex].trim() : "";
   const typeDeclaration = firstContent.match(/^graph\s+([a-z][a-z0-9_-]*)\s*$/i);
   if (!typeDeclaration) {
-    errors.push(issue(firstContentIndex + 1 || 1, "Expected a `graph directed`, `graph optimized`, `graph classified`, or `graph timeline` declaration"));
+    errors.push(issue(firstContentIndex + 1 || 1, "Expected a `graph directed`, `graph optimized`, `graph classified`, `graph timeline`, or `graph nested` declaration"));
     return { type, classes, base, nodes, edges: [], errors };
   }
   type = typeDeclaration[1].toLowerCase();
@@ -110,6 +297,7 @@ export function parseGraph(source) {
     errors.push(issue(firstContentIndex + 1, `Graph type "${type}" is not supported`));
     return { type, classes, base, nodes, edges: [], errors };
   }
+  if (type === "nested") return parseNestedGraph(lines, firstContentIndex);
 
   for (let index = 0; index < lines.length; index += 1) {
     const raw = lines[index];
@@ -358,6 +546,17 @@ export function setGraphType(source, type) {
     : null;
 
   const graph = parseGraph(String(source));
+  if (currentType === "nested" && type !== "nested" && !graph.errors.length) {
+    const flattened = ["graph directed", ""];
+    for (const node of graph.nodes) {
+      flattened.push(`state ${node.name}:`);
+      for (const edge of graph.edges.filter((candidate) => candidate.source === node.id)) {
+        flattened.push(`  ${edge.label} -> ${edge.target}`);
+      }
+    }
+    const directed = flattened.join("\n");
+    return type === "directed" ? directed : setGraphType(directed, type);
+  }
   const annotatedSource = currentType === "classified" || currentType === "timeline";
   const annotatedTarget = type === "classified" || type === "timeline";
   const targetClasses = annotatedSource && graph.classes.length
@@ -873,6 +1072,258 @@ function layoutTimelineGraph(graph, geometry) {
   };
 }
 
+function translateRoutedEdge(edge, dx, dy) {
+  const move = (point) => ({ x: point.x + dx, y: point.y + dy });
+  return {
+    ...edge,
+    points: edge.points.map(move),
+    start: move(edge.start),
+    end: move(edge.end),
+    labelPoint: move(edge.labelPoint),
+    arrow: edge.arrow.map(move),
+  };
+}
+
+function compactInnerLayout(graph, geometry) {
+  const size = Math.max(0.5, Math.min(1.4, geometry.options.size * 0.7));
+  const layout = layoutGraph(graph, {
+    ...geometry.options,
+    size,
+    buffer: Math.max(12, geometry.options.buffer * 0.7),
+  });
+  const boxes = [...layout.nodes.values()];
+  const points = layout.edges.flatMap((edge) => [
+    ...edge.points,
+    { x: edge.labelPoint.x - labelWidth(edge.label, layout.scale) / 2, y: edge.labelPoint.y - 13 * layout.scale },
+    { x: edge.labelPoint.x + labelWidth(edge.label, layout.scale) / 2, y: edge.labelPoint.y + 13 * layout.scale },
+  ]);
+  const minX = Math.min(...boxes.map((node) => node.x), ...points.map((point) => point.x));
+  const minY = Math.min(...boxes.map((node) => node.y), ...points.map((point) => point.y));
+  const maxX = Math.max(...boxes.map((node) => node.x + node.width), ...points.map((point) => point.x));
+  const maxY = Math.max(...boxes.map((node) => node.y + node.height), ...points.map((point) => point.y));
+  const nodes = new Map([...layout.nodes].map(([id, node]) => [id, { ...node, x: node.x - minX, y: node.y - minY }]));
+  return {
+    ...layout,
+    nodes,
+    edges: layout.edges.map((edge) => translateRoutedEdge(edge, -minX, -minY)),
+    width: maxX - minX,
+    height: maxY - minY,
+  };
+}
+
+function continueEdgeIntoContainer(edge, container, target, geometry) {
+  const scale = geometry.scale;
+  const end = edge.end;
+  const distances = [
+    { side: "left", value: Math.abs(end.x - container.x) },
+    { side: "right", value: Math.abs(end.x - container.x - container.width) },
+    { side: "top", value: Math.abs(end.y - container.y) },
+    { side: "bottom", value: Math.abs(end.y - container.y - container.height) },
+  ].sort((left, right) => left.value - right.value);
+  const side = distances[0].side;
+  const inset = Math.max(8 * scale, container.innerPadding / 2);
+  const laneY = container.y + container.headerHeight + container.innerPadding / 2;
+  let inside;
+  if (side === "left") inside = { x: container.x + inset, y: end.y };
+  else if (side === "right") inside = { x: container.x + container.width - inset, y: end.y };
+  else inside = { x: end.x, y: side === "top" ? container.y + inset : container.y + container.height - inset };
+  const targetPoint = { x: target.x + target.width / 2, y: target.y };
+  const additions = [inside, { x: inside.x, y: laneY }, { x: targetPoint.x, y: laneY }, targetPoint];
+  const points = [...edge.points, ...additions]
+    .filter((point, index, list) => index === 0 || point.x !== list[index - 1].x || point.y !== list[index - 1].y);
+  return {
+    ...edge,
+    points,
+    start: points[0],
+    end: points.at(-1),
+    arrow: arrowHead(points.at(-2), points.at(-1), scale),
+  };
+}
+
+function routeNestedOuterEdges(graph, positions, layers, innerGraphs, height, geometry) {
+  const ports = assignPorts(graph.edges, positions, layers, geometry);
+  const backward = graph.edges
+    .filter((edge) => layers.get(edge.target) < layers.get(edge.source))
+    .sort((left, right) => left.order - right.order);
+  const backwardLanes = new Map(backward.map((edge, index) => [edge.id, index]));
+  const longForward = graph.edges
+    .filter((edge) => layers.get(edge.target) - layers.get(edge.source) > 1)
+    .sort((left, right) => right.order - left.order);
+  const longForwardLanes = new Map(longForward.map((edge, index) => [edge.id, index]));
+  const forwardGroups = new Map();
+  for (const edge of graph.edges) {
+    if (layers.get(edge.target) !== layers.get(edge.source) + 1) continue;
+    const key = layers.get(edge.source);
+    if (!forwardGroups.has(key)) forwardGroups.set(key, []);
+    forwardGroups.get(key).push(edge);
+  }
+  const forwardLanes = new Map();
+  for (const edges of forwardGroups.values()) {
+    edges.sort((left, right) => {
+      const leftMiddle = positions.get(left.source).y + positions.get(left.target).y;
+      const rightMiddle = positions.get(right.source).y + positions.get(right.target).y;
+      return leftMiddle - rightMiddle || left.order - right.order;
+    });
+    edges.forEach((edge, index) => forwardLanes.set(edge.id, { index, count: edges.length }));
+  }
+  const verticalLanes = new Map();
+  const parallel = new Map();
+  const occupied = [];
+  const routed = [];
+  for (const edge of graph.edges) {
+    const source = positions.get(edge.source);
+    const target = positions.get(edge.target);
+    const sourceLayer = layers.get(edge.source);
+    const targetLayer = layers.get(edge.target);
+    const pair = `${edge.source}\u0000${edge.target}`;
+    const parallelIndex = parallel.get(pair) || 0;
+    parallel.set(pair, parallelIndex + 1);
+    let route;
+    if (targetLayer < sourceLayer) route = { kind: "backward", lane: backwardLanes.get(edge.id) };
+    else if (targetLayer > sourceLayer + 1) route = { kind: "long-forward", lane: longForwardLanes.get(edge.id), parallelIndex };
+    else if (targetLayer > sourceLayer) route = { kind: "forward", lane: forwardLanes.get(edge.id), parallelIndex };
+    else if (target.id === source.id) route = { kind: "self", lane: verticalLanes.get(`self:${source.id}`) || 0, parallelIndex };
+    else {
+      const key = `vertical:${source.x}`;
+      const lane = verticalLanes.get(key) || 0;
+      verticalLanes.set(key, lane + 1);
+      route = { kind: "vertical", lane, parallelIndex };
+    }
+    let result = route.kind === "long-forward"
+      ? routeLongForwardEdge(
+        edge,
+        source,
+        target,
+        ports.get(`${edge.id}:start`),
+        ports.get(`${edge.id}:end`),
+        route,
+        positions,
+        occupied,
+        height,
+        geometry,
+      )
+      : routeEdge(
+        edge,
+        source,
+        target,
+        parallelIndex,
+        ports.get(`${edge.id}:start`),
+        ports.get(`${edge.id}:end`),
+        route,
+        geometry,
+        occupied,
+      );
+    if (edge.entryTarget) {
+      const inner = innerGraphs.get(edge.target);
+      const entry = inner?.nodes.get(edge.entryTarget);
+      if (entry) result = continueEdgeIntoContainer(result, target, entry, geometry);
+    }
+    routed.push(result);
+    occupied.push(...routeSegments(result));
+  }
+  return routed;
+}
+
+function layoutNestedGraph(graph, geometry) {
+  const scale = geometry.scale;
+  const innerPadding = 18 * scale;
+  const headerHeight = 38 * scale;
+  const metrics = new Map(graph.nodes.map((node) => {
+    const hasInner = Boolean(node.innerGraph?.nodes.length);
+    const inner = hasInner ? compactInnerLayout(node.innerGraph, geometry) : null;
+    return [node.id, hasInner ? {
+      hasInner,
+      inner,
+      width: Math.max(250 * scale, inner.width + 2 * innerPadding),
+      height: headerHeight + inner.height + 2 * innerPadding,
+    } : {
+      hasInner,
+      inner,
+      width: geometry.nodeWidth,
+      height: geometry.nodeHeight,
+    }];
+  }));
+  const layers = naturalLayers(graph);
+  const maximumLayer = Math.max(...layers.values());
+  const columns = Array.from({ length: maximumLayer + 1 }, () => []);
+  for (const node of graph.nodes) columns[layers.get(node.id)].push(node);
+  const columnWidths = columns.map((column) => Math.max(
+    geometry.nodeWidth,
+    ...column.map((node) => metrics.get(node.id).width),
+  ));
+  const gaps = Array.from({ length: maximumLayer }, (_, index) => {
+    const crossing = graph.edges.filter((edge) => layers.get(edge.source) === index && layers.get(edge.target) === index + 1);
+    return Math.max(
+      geometry.layerGap * 0.82,
+      ...crossing.map((edge) => labelWidth(edge.label, scale) + 42 * scale),
+    );
+  });
+  const columnX = [geometry.margin];
+  for (let index = 1; index <= maximumLayer; index += 1) {
+    columnX[index] = columnX[index - 1] + columnWidths[index - 1] + gaps[index - 1];
+  }
+  const rowGap = Math.max(geometry.rowGap, geometry.buffer * 2 + 22 * scale);
+  const columnHeights = columns.map((column) => (
+    column.reduce((sum, node) => sum + metrics.get(node.id).height, 0) + Math.max(0, column.length - 1) * rowGap
+  ));
+  const backwardCount = graph.edges.filter((edge) => layers.get(edge.target) < layers.get(edge.source)).length;
+  const longForwardCount = graph.edges.filter((edge) => layers.get(edge.target) - layers.get(edge.source) > 1).length;
+  const topRouteBand = backwardCount ? geometry.buffer + (22 + (backwardCount - 1) * 26) * scale : 0;
+  const bottomRouteBand = longForwardCount ? (38 + (longForwardCount - 1) * 24) * scale : 0;
+  const contentHeight = Math.max(420 * scale * geometry.verticalShape, ...columnHeights) + 2 * geometry.margin;
+  const height = topRouteBand + contentHeight + bottomRouteBand;
+  const positions = new Map();
+  columns.forEach((column, index) => {
+    let y = topRouteBand + (contentHeight - columnHeights[index]) / 2;
+    for (const node of column) {
+      const metric = metrics.get(node.id);
+      const position = {
+        ...node,
+        x: columnX[index] + (columnWidths[index] - metric.width) / 2,
+        y,
+        width: metric.width,
+        height: metric.height,
+        hasInner: metric.hasInner,
+        headerHeight: metric.hasInner ? headerHeight : 0,
+        innerPadding: metric.hasInner ? innerPadding : 0,
+      };
+      positions.set(node.id, position);
+      y += metric.height + rowGap;
+    }
+  });
+  const innerGraphs = new Map();
+  for (const node of graph.nodes) {
+    const metric = metrics.get(node.id);
+    if (!metric.hasInner) continue;
+    const container = positions.get(node.id);
+    const dx = container.x + innerPadding;
+    const dy = container.y + headerHeight + innerPadding;
+    innerGraphs.set(node.id, {
+      container: node.id,
+      scale: metric.inner.scale,
+      nodes: new Map([...metric.inner.nodes].map(([id, inner]) => [id, { ...inner, x: inner.x + dx, y: inner.y + dy }])),
+      edges: metric.inner.edges.map((edge) => translateRoutedEdge(edge, dx, dy)),
+    });
+  }
+  const width = Math.max(
+    720 * scale * geometry.horizontalShape,
+    columnX[maximumLayer] + columnWidths[maximumLayer] + geometry.margin,
+  );
+  return {
+    nodes: positions,
+    edges: routeNestedOuterEdges(graph, positions, layers, innerGraphs, height, geometry),
+    innerGraphs,
+    width,
+    height,
+    scale,
+    options: geometry.options,
+    optimization: null,
+    columnHeaders: [],
+    columnBands: [],
+    rowHeaders: [],
+  };
+}
+
 export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
   const geometry = layoutGeometry(options);
   if (!graph.nodes.length) {
@@ -890,6 +1341,7 @@ export function layoutGraph(graph, options = DEFAULT_LAYOUT_OPTIONS) {
     };
   }
   if (graph.type === "timeline") return layoutTimelineGraph(graph, geometry);
+  if (graph.type === "nested") return layoutNestedGraph(graph, geometry);
 
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   const { outgoing, indegree } = graphTopology(graph);
@@ -1727,7 +2179,87 @@ function nodeLabelLines(name, nodeWidth = BASE_NODE_WIDTH) {
   return best.lines;
 }
 
+function svgEdgeMarkup(edge, scale, className = "edge") {
+  const width = labelWidth(edge.label, scale);
+  const path = edge.points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+    .join(" ");
+  const arrow = edge.arrow.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
+  return `<g class="${className}" data-edge="${escapeXml(edge.id)}">
+    <path d="${path}" />
+    <polygon points="${arrow}" />
+    <rect x="${edge.labelPoint.x - width / 2}" y="${edge.labelPoint.y - 12 * scale}" width="${width}" height="${24 * scale}" />
+    <text x="${edge.labelPoint.x}" y="${edge.labelPoint.y + 4 * scale}">${escapeXml(edge.label)}</text>
+  </g>`;
+}
+
+function svgRegularNodeMarkup(node, scale, className = "node", attributes = "") {
+  const lines = nodeLabelLines(node.name, node.width / scale);
+  const longest = Math.max(...lines.map((line) => line.length));
+  const fontSize = Math.max(11 * scale, Math.min(14 * scale, (node.width - 24 * scale) / (longest * 0.58)));
+  const centerX = node.x + node.width / 2;
+  const firstY = node.y + node.height / 2 + 5 * scale - (lines.length - 1) * 8 * scale;
+  const text = lines.map((line, index) => `<tspan x="${centerX}"${index ? ` dy="${17 * scale}"` : ""}>${escapeXml(line)}</tspan>`).join("");
+  return `<g class="${className}" data-state="${escapeXml(node.id)}" ${attributes}>
+    <rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" />
+    <text x="${centerX}" y="${firstY}" style="font-size:${fontSize.toFixed(2)}px">${text}</text>
+  </g>`;
+}
+
+function renderNestedSvg(graph, layout) {
+  const scale = layout.scale || 1;
+  const containers = [...layout.nodes.values()].filter((node) => node.hasInner);
+  const leaves = [...layout.nodes.values()].filter((node) => !node.hasInner);
+  const backgrounds = containers.map((node) => `<g class="nested-container-background" data-container="${escapeXml(node.id)}">
+    <rect class="container-body" x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" />
+    <rect class="container-header" x="${node.x}" y="${node.y}" width="${node.width}" height="${node.headerHeight}" />
+  </g>`).join("\n");
+  const innerEdges = [...(layout.innerGraphs || new Map()).values()].flatMap((inner) => (
+    inner.edges.map((edge) => svgEdgeMarkup(edge, inner.scale, "edge inner-edge"))
+  )).join("\n");
+  const outerEdges = layout.edges.map((edge) => svgEdgeMarkup(edge, scale, "edge outer-edge")).join("\n");
+  const innerNodes = [...(layout.innerGraphs || new Map()).entries()].flatMap(([containerId, inner]) => (
+    [...inner.nodes.values()].map((node) => svgRegularNodeMarkup(
+      node,
+      inner.scale,
+      "node nested-node",
+      `data-container="${escapeXml(containerId)}" data-inner-state="${escapeXml(node.name)}"`,
+    ))
+  )).join("\n");
+  const leafNodes = leaves.map((node) => svgRegularNodeMarkup(node, scale)).join("\n");
+  const overlays = containers.map((node) => `<g class="node nested-container" data-state="${escapeXml(node.id)}">
+    <rect class="container-outline" x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" />
+    <text class="container-title" x="${node.x + 14 * scale}" y="${node.y + 25 * scale}">${escapeXml(node.name)}</text>
+  </g>`).join("\n");
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${layout.width} ${layout.height}" width="${layout.width}" height="${layout.height}" role="img" aria-label="Compiled nested state diagram">
+    <style>
+      .edge path { fill: none; stroke: #111; stroke-width: ${1.6 * scale}; stroke-linecap: square; stroke-linejoin: round; }
+      .inner-edge path { stroke-width: ${1.35 * scale}; }
+      .edge polygon { fill: #111; }
+      .edge rect { fill: #fff; }
+      .edge text { fill: #111; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: ${13 * scale}px; text-anchor: middle; }
+      .inner-edge text { font-size: ${11 * scale}px; }
+      .container-body { fill: #f3f1eb; stroke: none; }
+      .container-header { fill: #111; stroke: none; }
+      .container-outline { fill: none; stroke: #111; stroke-width: ${2.2 * scale}; }
+      .node:not(.nested-container) > rect:first-child { fill: #fff; stroke: #111; stroke-width: ${2 * scale}; }
+      .nested-node > rect:first-child { stroke-width: ${1.7 * scale}; }
+      .node text { fill: #111; font-family: Inter, Arial, sans-serif; font-size: ${14 * scale}px; font-weight: 600; text-anchor: middle; }
+      .node.nested-container .container-title { fill: #fff; font-size: ${14 * scale}px; font-weight: 750; text-anchor: start; }
+    </style>
+    <rect width="100%" height="100%" fill="#fff" />
+    ${backgrounds}
+    ${innerEdges}
+    ${outerEdges}
+    ${innerNodes}
+    ${leafNodes}
+    ${overlays}
+  </svg>`;
+}
+
 export function renderSvg(graph, layout) {
+  if (graph.type === "nested") return renderNestedSvg(graph, layout);
   const scale = layout.scale || 1;
   const bands = (layout.columnBands || []).map((band) => `<rect class="column-band" data-class="${escapeXml(band.className)}" x="${band.x}" y="${band.y}" width="${band.width}" height="${band.height}" fill="${band.color}" />`).join("\n");
   const headers = (layout.columnHeaders || []).map((header) => {
@@ -1746,19 +2278,7 @@ export function renderSvg(graph, layout) {
       <text x="${header.x + 18 * scale}" y="${centerY + 4 * scale}" fill="${header.ink}">${escapeXml(header.className.toUpperCase())}</text>
     </g>`;
   }).join("\n");
-  const edges = layout.edges.map((edge) => {
-    const width = labelWidth(edge.label, scale);
-    const path = edge.points
-      .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
-      .join(" ");
-    const arrow = edge.arrow.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(" ");
-    return `<g class="edge">
-      <path d="${path}" />
-      <polygon points="${arrow}" />
-      <rect x="${edge.labelPoint.x - width / 2}" y="${edge.labelPoint.y - 12 * scale}" width="${width}" height="${24 * scale}" />
-      <text x="${edge.labelPoint.x}" y="${edge.labelPoint.y + 4 * scale}">${escapeXml(edge.label)}</text>
-    </g>`;
-  }).join("\n");
+  const edges = layout.edges.map((edge) => svgEdgeMarkup(edge, scale)).join("\n");
 
   const nodes = [...layout.nodes.values()].map((node) => {
     if (graph.type === "timeline") {
@@ -1778,16 +2298,7 @@ export function renderSvg(graph, layout) {
         ${base}
       </g>`;
     }
-    const lines = nodeLabelLines(node.name, node.width / scale);
-    const longest = Math.max(...lines.map((line) => line.length));
-    const fontSize = Math.max(13 * scale, Math.min(14 * scale, (node.width - 24 * scale) / (longest * 0.58)));
-    const centerX = node.x + node.width / 2;
-    const firstY = node.y + node.height / 2 + 5 * scale - (lines.length - 1) * 8 * scale;
-    const text = lines.map((line, index) => `<tspan x="${centerX}"${index ? ` dy="${17 * scale}"` : ""}>${escapeXml(line)}</tspan>`).join("");
-    return `<g class="node" data-state="${escapeXml(node.id)}">
-      <rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" />
-      <text x="${centerX}" y="${firstY}" style="font-size:${fontSize.toFixed(2)}px">${text}</text>
-    </g>`;
+    return svgRegularNodeMarkup(node, scale);
   }).join("\n");
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${layout.width} ${layout.height}" width="${layout.width}" height="${layout.height}" role="img" aria-label="Compiled state diagram">
@@ -1896,7 +2407,20 @@ export function buildPdf(graph, layout) {
     commands.push("0 0 0 RG", "0 0 0 rg");
   }
 
-  for (const edge of layout.edges) {
+  if (graph.type === "nested") {
+    for (const node of layout.nodes.values()) {
+      if (!node.hasInner) continue;
+      const bottomLeft = point({ x: node.x, y: node.y + node.height });
+      const headerBottomLeft = point({ x: node.x, y: node.y + node.headerHeight });
+      commands.push(`${pdfColor("#f3f1eb")} rg ${bottomLeft.x.toFixed(3)} ${bottomLeft.y.toFixed(3)} ${(node.width * scale).toFixed(3)} ${(node.height * scale).toFixed(3)} re f`);
+      commands.push(`0 0 0 rg ${headerBottomLeft.x.toFixed(3)} ${headerBottomLeft.y.toFixed(3)} ${(node.width * scale).toFixed(3)} ${(node.headerHeight * scale).toFixed(3)} re f`);
+    }
+  }
+
+  const pdfEdges = graph.type === "nested"
+    ? [...layout.edges, ...[...(layout.innerGraphs || new Map()).values()].flatMap((inner) => inner.edges)]
+    : layout.edges;
+  for (const edge of pdfEdges) {
     const path = edge.points.map(point);
     commands.push(`${Math.max(0.8, 1.4 * scale).toFixed(3)} w`);
     commands.push(`${path[0].x.toFixed(3)} ${path[0].y.toFixed(3)} m ${path.slice(1).map((pathPoint) => `${pathPoint.x.toFixed(3)} ${pathPoint.y.toFixed(3)} l`).join(" ")} S`);
@@ -1941,10 +2465,34 @@ export function buildPdf(graph, layout) {
       }
       continue;
     }
+    if (graph.type === "nested" && node.hasInner) {
+      const headerBottomLeft = point({ x: node.x, y: node.y + node.headerHeight });
+      commands.push(`${bottomLeft.x.toFixed(3)} ${bottomLeft.y.toFixed(3)} ${(node.width * scale).toFixed(3)} ${(node.height * scale).toFixed(3)} re S`);
+      commands.push(`0 0 0 rg ${headerBottomLeft.x.toFixed(3)} ${headerBottomLeft.y.toFixed(3)} ${(node.width * scale).toFixed(3)} ${(node.headerHeight * scale).toFixed(3)} re f`);
+      const title = point({ x: node.x + 14 * layout.scale, y: node.y + 25 * layout.scale });
+      const fontSize = Math.max(8, Math.min(12, 13 * scale));
+      commands.push("1 1 1 rg");
+      commands.push(`BT /F2 ${fontSize.toFixed(3)} Tf ${title.x.toFixed(3)} ${title.y.toFixed(3)} Td (${pdfEscape(node.name)}) Tj ET`);
+      commands.push("0 0 0 rg");
+      continue;
+    }
     commands.push(`${bottomLeft.x.toFixed(3)} ${bottomLeft.y.toFixed(3)} ${(node.width * scale).toFixed(3)} ${(node.height * scale).toFixed(3)} re S`);
     const center = point({ x: node.x + node.width / 2, y: node.y + node.height / 2 });
     const fontSize = Math.max(8, Math.min(12, 14 * scale));
     commands.push(`BT /F2 ${fontSize.toFixed(3)} Tf ${(center.x - node.name.length * fontSize * 0.29).toFixed(3)} ${(center.y - fontSize * 0.34).toFixed(3)} Td (${pdfEscape(node.name)}) Tj ET`);
+  }
+
+  if (graph.type === "nested") {
+    for (const inner of (layout.innerGraphs || new Map()).values()) {
+      for (const node of inner.nodes.values()) {
+        const bottomLeft = point({ x: node.x, y: node.y + node.height });
+        commands.push(`${Math.max(0.8, 1.5 * scale).toFixed(3)} w`);
+        commands.push(`1 1 1 rg 0 0 0 RG ${bottomLeft.x.toFixed(3)} ${bottomLeft.y.toFixed(3)} ${(node.width * scale).toFixed(3)} ${(node.height * scale).toFixed(3)} re B`);
+        const center = point({ x: node.x + node.width / 2, y: node.y + node.height / 2 });
+        const fontSize = Math.max(7, Math.min(11, 12 * scale));
+        commands.push(`BT /F2 ${fontSize.toFixed(3)} Tf ${(center.x - node.name.length * fontSize * 0.29).toFixed(3)} ${(center.y - fontSize * 0.34).toFixed(3)} Td (${pdfEscape(node.name)}) Tj ET`);
+      }
+    }
   }
 
   const stream = `${commands.join("\n")}\n`;

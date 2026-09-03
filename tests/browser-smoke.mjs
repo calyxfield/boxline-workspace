@@ -165,9 +165,42 @@ state Controls [detail]:
   await page.locator('[data-graph-action="export-png"]').click();
   const timelineDownload = await timelineDownloadPromise;
   await timelineDownload.saveAs(join(artifacts.pathname, "timeline-graph.png"));
+
+  const nestedSource = await readFile(new URL("../examples/nested-release-flow.boxline", import.meta.url), "utf8");
+  await page.evaluate((value) => window.boxlineEditor.setSource(value), nestedSource);
+  assert.equal(await page.locator("[data-graph-type]").inputValue(), "nested");
+  assert.equal(await page.locator("[data-graph-status]").textContent(), "4 STATES · 3 ARROWS · 5 INNER STATES");
+  assert.match(await page.locator("[data-graph-layout-mode]").textContent(), /^NESTED · 2 CONTAINERS · 5 INNER STATES$/);
+  assert.equal(await page.locator("[data-graph-preview] .nested-container").count(), 2);
+  assert.equal(await page.locator("[data-graph-preview] .nested-node").count(), 5);
+  assert.equal(await page.locator("[data-graph-preview] .outer-edge").count(), 3);
+  assert.equal(await page.locator("[data-graph-preview] .inner-edge").count(), 3);
+  assert.deepEqual(await page.locator("[data-graph-preview] .container-title").first().evaluate((title) => ({
+    fill: getComputedStyle(title).fill,
+    anchor: getComputedStyle(title).textAnchor,
+  })), { fill: "rgb(255, 255, 255)", anchor: "start" });
+  const nestedEntry = await page.evaluate(() => {
+    const node = document.querySelector('[data-inner-state="Inspect"] rect');
+    const edge = document.querySelector('[data-edge="edge-0"] path');
+    const end = edge.getPointAtLength(edge.getTotalLength());
+    return {
+      targetX: Number(node.getAttribute("x")) + Number(node.getAttribute("width")) / 2,
+      targetY: Number(node.getAttribute("y")),
+      endX: end.x,
+      endY: end.y,
+    };
+  });
+  assert.ok(Math.abs(nestedEntry.targetX - nestedEntry.endX) < 0.1);
+  assert.ok(Math.abs(nestedEntry.targetY - nestedEntry.endY) < 0.1);
+  await page.screenshot({ path: join(artifacts.pathname, "nested-desktop.png") });
+  const nestedDownloadPromise = page.waitForEvent("download");
+  await page.locator('[data-graph-action="export-png"]').click();
+  const nestedDownload = await nestedDownloadPromise;
+  await nestedDownload.saveAs(join(artifacts.pathname, "nested-graph.png"));
+
   await page.locator("[data-graph-type]").selectOption("optimized");
   assert.doesNotMatch(await page.evaluate(() => window.boxlineEditor.getSource()), /^(?:rows|base) /m);
-  assert.match(await page.evaluate(() => window.boxlineEditor.getSource()), /text:\n    Name the problem/);
+  assert.doesNotMatch(await page.evaluate(() => window.boxlineEditor.getSource()), /^\s+state Inspect:/m);
   await page.evaluate((value) => window.boxlineEditor.setSource(value), "graph optimized\n\nstate Input:\n  next -> Output\nstate Output:");
 
   const zoomWidthBefore = await page.locator("[data-graph-preview] svg").evaluate((svg) => svg.getBoundingClientRect().width);
@@ -363,6 +396,8 @@ state Controls [detail]:
       "artifacts/timeline-desktop.png",
       "artifacts/timeline-graph.png",
       "artifacts/product-timeline-graph.png",
+      "artifacts/nested-desktop.png",
+      "artifacts/nested-graph.png",
       "artifacts/layout-window-desktop.png",
       "artifacts/mobile.png",
       "artifacts/layout-window-mobile.png",
