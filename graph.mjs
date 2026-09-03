@@ -448,8 +448,165 @@ function wrapTimelineText(text, maximumCharacters) {
   return output;
 }
 
+function timelineRootedLayers(nodes, outgoing, indegree, rootId) {
+  const fallback = longestDagLayers(nodes, outgoing, indegree)
+    ?? breadthFirstLayers(nodes, outgoing, indegree);
+  if (!rootId || !outgoing.has(rootId)) return fallback;
+
+  const layers = new Map([[rootId, 0]]);
+  const queue = [rootId];
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const source = queue[cursor];
+    for (const target of outgoing.get(source)) {
+      if (target === source || layers.has(target)) continue;
+      layers.set(target, layers.get(source) + 1);
+      queue.push(target);
+    }
+  }
+
+  const unvisited = nodes
+    .filter((node) => !layers.has(node.id))
+    .sort((left, right) => fallback.get(left.id) - fallback.get(right.id) || left.order - right.order);
+  if (!unvisited.length) return layers;
+  const tail = Math.max(...layers.values()) + 1;
+  const firstFallback = fallback.get(unvisited[0].id);
+  for (const node of unvisited) layers.set(node.id, tail + fallback.get(node.id) - firstFallback);
+  return layers;
+}
+
+function timelineRowComponents(nodes, graphEdges, metrics, nodeGap, trackGap, rootId = null) {
+  const ids = new Set(nodes.map((node) => node.id));
+  const edges = graphEdges.filter((edge) => ids.has(edge.source) && ids.has(edge.target));
+  const neighbors = new Map(nodes.map((node) => [node.id, []]));
+  for (const edge of edges) {
+    if (edge.source === edge.target) continue;
+    neighbors.get(edge.source).push(edge.target);
+    neighbors.get(edge.target).push(edge.source);
+  }
+
+  const seen = new Set();
+  const memberGroups = [];
+  for (const node of nodes) {
+    if (seen.has(node.id)) continue;
+    const members = [];
+    const stack = [node.id];
+    seen.add(node.id);
+    while (stack.length) {
+      const id = stack.pop();
+      members.push(id);
+      for (const neighbor of neighbors.get(id)) {
+        if (seen.has(neighbor)) continue;
+        seen.add(neighbor);
+        stack.push(neighbor);
+      }
+    }
+    memberGroups.push(members);
+  }
+
+  memberGroups.sort((left, right) => {
+    if (rootId) {
+      const leftHasRoot = left.includes(rootId);
+      const rightHasRoot = right.includes(rootId);
+      if (leftHasRoot !== rightHasRoot) return leftHasRoot ? -1 : 1;
+    }
+    const leftOrder = Math.min(...left.map((id) => nodes.find((node) => node.id === id).order));
+    const rightOrder = Math.min(...right.map((id) => nodes.find((node) => node.id === id).order));
+    return leftOrder - rightOrder;
+  });
+
+  return memberGroups.map((members) => {
+    const memberIds = new Set(members);
+    const componentNodes = nodes.filter((node) => memberIds.has(node.id));
+    const componentEdges = edges.filter((edge) => memberIds.has(edge.source) && memberIds.has(edge.target));
+    const outgoing = new Map(componentNodes.map((node) => [node.id, []]));
+    const indegree = new Map(componentNodes.map((node) => [node.id, 0]));
+    for (const edge of componentEdges) {
+      if (outgoing.get(edge.source).includes(edge.target)) continue;
+      outgoing.get(edge.source).push(edge.target);
+      if (edge.source !== edge.target) indegree.set(edge.target, indegree.get(edge.target) + 1);
+    }
+    const componentRoot = memberIds.has(rootId) ? rootId : null;
+    const rawLayers = timelineRootedLayers(componentNodes, outgoing, indegree, componentRoot);
+    const layerValues = [...new Set(rawLayers.values())].sort((left, right) => left - right);
+    const normalizedLayers = new Map(layerValues.map((value, index) => [value, index]));
+    const layers = new Map(componentNodes.map((node) => [node.id, normalizedLayers.get(rawLayers.get(node.id))]));
+    const columns = [];
+    for (const node of componentNodes) {
+      const column = layers.get(node.id) ?? 0;
+      if (!columns[column]) columns[column] = [];
+      columns[column].push(node.id);
+    }
+    optimizeLayerOrder({ nodes: componentNodes, edges: componentEdges }, layers, columns);
+
+    const columnWidths = columns.map((column) => Math.max(...column.map((id) => metrics.get(id).width)));
+    const columnX = [];
+    let x = 0;
+    for (let index = 0; index < columns.length; index += 1) {
+      columnX[index] = x;
+      x += columnWidths[index] + (index < columns.length - 1 ? nodeGap : 0);
+    }
+    const columnHeights = columns.map((column) => column.reduce(
+      (height, id, index) => height + metrics.get(id).height + (index ? trackGap : 0),
+      0,
+    ));
+    const height = Math.max(...columnHeights);
+    const local = new Map();
+    columns.forEach((column, columnIndex) => {
+      let y = (height - columnHeights[columnIndex]) / 2;
+      for (const id of column) {
+        const metric = metrics.get(id);
+        local.set(id, {
+          x: columnX[columnIndex] + (columnWidths[columnIndex] - metric.width) / 2,
+          y,
+          ...metric,
+        });
+        y += metric.height + trackGap;
+      }
+    });
+    return {
+      nodes: componentNodes,
+      edges: componentEdges,
+      local,
+      width: x,
+      height,
+      order: Math.min(...componentNodes.map((node) => node.order)),
+      hasRoot: Boolean(componentRoot),
+    };
+  });
+}
+
 function timelineRouteEdges(graph, positions, geometry) {
   const scale = geometry.scale;
+  const crossPortGroups = new Map();
+  for (const edge of graph.edges) {
+    const source = positions.get(edge.source);
+    const target = positions.get(edge.target);
+    if (!source || !target || source.className === target.className) continue;
+    for (const endpoint of ["source", "target"]) {
+      const node = endpoint === "source" ? source : target;
+      const other = endpoint === "source" ? target : source;
+      const nodeCenterY = node.y + node.height / 2;
+      const otherCenterY = other.y + other.height / 2;
+      const side = otherCenterY < nodeCenterY ? "top" : "bottom";
+      const key = `${node.id}\u0000${side}`;
+      if (!crossPortGroups.has(key)) crossPortGroups.set(key, []);
+      crossPortGroups.get(key).push({ edge, endpoint, node, other, side });
+    }
+  }
+  const crossPorts = new Map();
+  for (const group of crossPortGroups.values()) {
+    group.sort((left, right) => {
+      const leftCenter = left.other.x + left.other.width / 2;
+      const rightCenter = right.other.x + right.other.width / 2;
+      return leftCenter - rightCenter || left.edge.order - right.edge.order;
+    });
+    group.forEach((item, index) => {
+      crossPorts.set(`${item.edge.id}:${item.endpoint}`, {
+        x: item.node.x + item.node.width * (index + 1) / (group.length + 1),
+        y: item.side === "top" ? item.node.y : item.node.y + item.node.height,
+      });
+    });
+  }
   return graph.edges.map((edge) => {
     const source = positions.get(edge.source);
     const target = positions.get(edge.target);
@@ -492,21 +649,70 @@ function timelineRouteEdges(graph, positions, geometry) {
       }
     } else {
       const targetAbove = target.y < source.y;
-      const start = {
+      const start = crossPorts.get(`${edge.id}:source`) ?? {
         x: source.x + source.width / 2,
         y: targetAbove ? source.y : source.y + source.height,
       };
-      const end = {
+      const end = crossPorts.get(`${edge.id}:target`) ?? {
         x: target.x + target.width / 2,
         y: targetAbove ? target.y + target.height : target.y,
       };
-      if (Math.abs(start.x - end.x) < 0.01) {
-        points = [start, end];
-        labelPoint = { x: start.x, y: (start.y + end.y) / 2 };
-      } else {
+      if (Math.abs(start.x - end.x) < 0.01) points = [start, end];
+      else {
         const laneY = (start.y + end.y) / 2;
         points = [start, { x: start.x, y: laneY }, { x: end.x, y: laneY }, end];
-        labelPoint = { x: (start.x + end.x) / 2, y: laneY };
+      }
+      const obstacles = [...positions.values()].filter((node) => node.id !== source.id && node.id !== target.id);
+      const segmentHits = (first, second, node) => {
+        if (first.x === second.x) {
+          const top = Math.min(first.y, second.y);
+          const bottom = Math.max(first.y, second.y);
+          return first.x > node.x && first.x < node.x + node.width
+            && bottom > node.y && top < node.y + node.height;
+        }
+        const left = Math.min(first.x, second.x);
+        const right = Math.max(first.x, second.x);
+        return first.y > node.y && first.y < node.y + node.height
+          && right > node.x && left < node.x + node.width;
+      };
+      const blockers = obstacles.filter((node) => points.some(
+        (point, pointIndex) => pointIndex && segmentHits(points[pointIndex - 1], point, node),
+      ));
+      if (blockers.length) {
+        const top = Math.min(start.y, end.y);
+        const bottom = Math.max(start.y, end.y);
+        const crossingRows = obstacles.filter((node) => bottom > node.y && top < node.y + node.height);
+        let laneX = Math.max(
+          source.x + source.width,
+          target.x + target.width,
+          ...blockers.map((node) => node.x + node.width),
+        ) + geometry.buffer;
+        let moved = true;
+        while (moved) {
+          moved = false;
+          for (const node of crossingRows) {
+            if (laneX <= node.x || laneX >= node.x + node.width) continue;
+            laneX = node.x + node.width + geometry.buffer;
+            moved = true;
+          }
+        }
+        const direction = end.y > start.y ? 1 : -1;
+        const lead = Math.min(20 * scale, Math.abs(end.y - start.y) / 4);
+        const startLaneY = start.y + direction * lead;
+        const endLaneY = end.y - direction * lead;
+        points = [
+          start,
+          { x: start.x, y: startLaneY },
+          { x: laneX, y: startLaneY },
+          { x: laneX, y: endLaneY },
+          { x: end.x, y: endLaneY },
+          end,
+        ];
+        labelPoint = { x: laneX, y: (startLaneY + endLaneY) / 2 };
+      } else if (points.length === 2) {
+        labelPoint = { x: start.x, y: (start.y + end.y) / 2 };
+      } else {
+        labelPoint = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
       }
     }
     points = points.filter((point, index) => index === 0 || point.x !== points[index - 1].x || point.y !== points[index - 1].y);
@@ -538,11 +744,26 @@ function layoutTimelineGraph(graph, geometry) {
   const rows = rowNames.map((name) => graph.nodes.filter((node) => node.className === name));
   const placedRows = new Set(rows.flat().map((node) => node.id));
   for (const node of graph.nodes) if (!placedRows.has(node.id)) rows[0].push(node);
-  const rowHeights = rows.map((nodes) => Math.max(88 * scale, ...nodes.map((node) => metrics.get(node.id).height)));
   const rowGap = Math.max(72 * scale, geometry.rowGap * 0.9);
   const headerWidth = 118 * scale;
   const xStart = geometry.margin + headerWidth;
   const nodeGap = Math.max(76 * scale, geometry.layerGap * 0.48);
+  const componentGap = nodeGap * 1.35;
+  const trackGap = Math.max(34 * scale, geometry.rowGap * 0.42);
+  const baseRow = rows[0] || [];
+  const baseId = baseRow.some((node) => node.id === graph.base) ? graph.base : baseRow[0]?.id;
+  const rowLayouts = rows.map((nodes, index) => timelineRowComponents(
+    nodes,
+    graph.edges,
+    metrics,
+    nodeGap,
+    trackGap,
+    index === 0 ? baseId : null,
+  ));
+  const rowHeights = rowLayouts.map((components) => Math.max(
+    88 * scale,
+    ...components.map((component) => component.height),
+  ));
   const rowY = [];
   let yCursor = geometry.margin;
   for (let index = rowNames.length - 1; index >= 0; index -= 1) {
@@ -550,84 +771,77 @@ function layoutTimelineGraph(graph, geometry) {
     yCursor += rowHeights[index] + (index ? rowGap : 0);
   }
 
-  const baseRow = rows[0] || [];
-  const baseId = baseRow.some((node) => node.id === graph.base) ? graph.base : baseRow[0]?.id;
-  const baseById = new Map(baseRow.map((node) => [node.id, node]));
-  const baseOrder = [];
-  const visited = new Set();
-  const queue = baseId ? [baseId] : [];
-  for (let cursor = 0; cursor < queue.length; cursor += 1) {
-    const id = queue[cursor];
-    if (visited.has(id) || !baseById.has(id)) continue;
-    visited.add(id);
-    baseOrder.push(baseById.get(id));
-    for (const edge of graph.edges) {
-      if (edge.source === id && baseById.has(edge.target) && !visited.has(edge.target)) queue.push(edge.target);
-    }
-  }
-  for (const node of baseRow) if (!visited.has(node.id)) baseOrder.push(node);
-
   const positions = new Map();
-  let xCursor = xStart;
-  for (const node of baseOrder) {
-    const metric = metrics.get(node.id);
-    const classIndex = 0;
-    const palette = CLASS_COLUMN_PALETTE[classIndex];
-    positions.set(node.id, {
-      ...node,
-      ...metric,
-      x: xCursor,
-      y: rowY[0] + (rowHeights[0] - metric.height) / 2,
-      classIndex,
-      fill: palette.band,
-      accent: palette.header,
-      ink: palette.ink,
-      isBase: node.id === baseId,
+  for (let index = 0; index < rowLayouts.length; index += 1) {
+    const palette = CLASS_COLUMN_PALETTE[index % CLASS_COLUMN_PALETTE.length];
+    const candidates = rowLayouts[index].map((component) => {
+      const offsets = [];
+      for (const edge of graph.edges) {
+        if (component.local.has(edge.source) && positions.has(edge.target)) {
+          const local = component.local.get(edge.source);
+          const target = positions.get(edge.target);
+          offsets.push(target.x + target.width / 2 - local.x - local.width / 2);
+        }
+        if (component.local.has(edge.target) && positions.has(edge.source)) {
+          const local = component.local.get(edge.target);
+          const source = positions.get(edge.source);
+          offsets.push(source.x + source.width / 2 - local.x - local.width / 2);
+        }
+      }
+      offsets.sort((left, right) => left - right);
+      return {
+        component,
+        desiredX: index === 0
+          ? null
+          : offsets.length ? offsets[Math.floor((offsets.length - 1) / 2)] : null,
+        anchored: offsets.length > 0,
+      };
     });
-    xCursor += metric.width + nodeGap;
+    candidates.sort((left, right) => {
+      if (index === 0 && left.component.hasRoot !== right.component.hasRoot) {
+        return left.component.hasRoot ? -1 : 1;
+      }
+      if (left.anchored !== right.anchored) return left.anchored ? -1 : 1;
+      if (left.anchored && right.anchored && left.desiredX !== right.desiredX) return left.desiredX - right.desiredX;
+      return left.component.order - right.component.order;
+    });
+
+    const placedComponents = [];
+    for (const candidate of candidates) {
+      let componentX = candidate.desiredX;
+      if (componentX === null) {
+        componentX = placedComponents.length
+          ? Math.max(...placedComponents.map((placed) => placed.x + placed.width)) + componentGap
+          : xStart;
+      }
+      for (const previous of placedComponents) {
+        if (componentX >= previous.x + previous.width + componentGap || componentX + candidate.component.width + componentGap <= previous.x) continue;
+        componentX = previous.x + previous.width + componentGap;
+      }
+      const componentY = rowY[index] + (rowHeights[index] - candidate.component.height) / 2;
+      for (const node of candidate.component.nodes) {
+        const local = candidate.component.local.get(node.id);
+        positions.set(node.id, {
+          ...node,
+          ...local,
+          x: componentX + local.x,
+          y: componentY + local.y,
+          classIndex: index,
+          fill: palette.band,
+          accent: palette.header,
+          ink: palette.ink,
+          isBase: node.id === baseId,
+          anchored: candidate.anchored,
+        });
+      }
+      placedComponents.push({ x: componentX, width: candidate.component.width });
+    }
   }
 
-  const baseCenters = new Map(baseOrder.map((node) => {
-    const position = positions.get(node.id);
-    return [node.id, position.x + position.width / 2];
-  }));
-  for (let index = 1; index < rows.length; index += 1) {
-    const palette = CLASS_COLUMN_PALETTE[index % CLASS_COLUMN_PALETTE.length];
-    const preferred = rows[index].map((node, nodeIndex) => {
-      const anchors = [];
-      for (const edge of graph.edges) {
-        if (edge.source === node.id && baseCenters.has(edge.target)) anchors.push(baseCenters.get(edge.target));
-        if (edge.target === node.id && baseCenters.has(edge.source)) anchors.push(baseCenters.get(edge.source));
-      }
-      anchors.sort((left, right) => left - right);
-      const center = anchors.length
-        ? anchors[Math.floor((anchors.length - 1) / 2)]
-        : xStart + nodeIndex * (nodeWidth + nodeGap) + nodeWidth / 2;
-      return { node, center, anchored: anchors.length > 0 };
-    }).sort((left, right) => left.center - right.center || left.node.order - right.node.order);
-    const placed = [];
-    for (const item of preferred) {
-      const metric = metrics.get(item.node.id);
-      let x = Math.max(xStart, item.center - metric.width / 2);
-      for (const previous of placed) {
-        if (x >= previous.x + previous.width + nodeGap) continue;
-        x = previous.x + previous.width + nodeGap;
-      }
-      const position = {
-        ...item.node,
-        ...metric,
-        x,
-        y: rowY[index] + (rowHeights[index] - metric.height) / 2,
-        classIndex: index,
-        fill: palette.band,
-        accent: palette.header,
-        ink: palette.ink,
-        isBase: false,
-        anchored: item.anchored,
-      };
-      positions.set(item.node.id, position);
-      placed.push(position);
-    }
+  const minimumX = Math.min(xStart, ...[...positions.values()].map((node) => node.x));
+  if (minimumX < xStart) {
+    const shift = xStart - minimumX;
+    for (const node of positions.values()) node.x += shift;
   }
 
   const right = Math.max(xStart + nodeWidth, ...[...positions.values()].map((node) => node.x + node.width));

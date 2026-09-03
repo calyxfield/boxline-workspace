@@ -83,6 +83,13 @@ try {
   await page.locator("[data-graph-type]").selectOption("timeline");
   assert.match(await page.evaluate(() => window.boxlineEditor.getSource()), /^graph timeline\nrows timeline context\nbase Pump/);
   assert.equal((await page.evaluate(() => window.__boxlineWorkspace.getState().compiled)).type, "timeline");
+  const productTimelineSource = await readFile(new URL("../examples/product-timeline.boxline", import.meta.url), "utf8");
+  await page.evaluate((value) => window.boxlineEditor.setSource(value), productTimelineSource);
+  assert.equal(await page.locator("[data-graph-preview] .timeline-node").count(), 9);
+  const productTimelineDownloadPromise = page.waitForEvent("download");
+  await page.locator('[data-graph-action="export-png"]').click();
+  const productTimelineDownload = await productTimelineDownloadPromise;
+  await productTimelineDownload.saveAs(join(artifacts.pathname, "product-timeline-graph.png"));
   const timelineSource = `graph timeline
 rows timeline context detail
 base Start
@@ -99,14 +106,22 @@ state Review [timeline]:
 state Evidence [context]:
   text: Five operators complete the critical handoff without coaching.
   explains -> Review
+state Problem [context]:
+  text: The work begins with a falsifiable claim about the operator's actual constraint.
+  develops -> Evidence
+  frames -> Start
 state Approval [detail]:
   text: Security and support owners accept the release path.
-  gates -> Finish`;
+  gates -> Finish
+state Controls [detail]:
+  text: Threat modeling and access review establish the release conditions.
+  next -> Approval
+  informs -> Review`;
   await page.evaluate((value) => window.boxlineEditor.setSource(value), timelineSource);
   assert.equal(await page.locator("[data-graph-type]").inputValue(), "timeline");
   assert.match(await page.locator("[data-graph-layout-mode]").textContent(), /^TIMELINE · 3 ROWS · BASE Start$/);
   assert.equal(await page.locator("[data-graph-preview] .row-header").count(), 3);
-  assert.equal(await page.locator("[data-graph-preview] .timeline-node").count(), 5);
+  assert.equal(await page.locator("[data-graph-preview] .timeline-node").count(), 7);
   assert.equal(await page.locator('[data-graph-preview] .timeline-node[data-base="true"]').count(), 1);
   assert.match(await page.locator('[data-state="Start"] .node-body').textContent(), /riskiestassumption/);
   const timelineGeometry = await page.evaluate(() => {
@@ -121,19 +136,35 @@ state Approval [detail]:
         fill: rect.getAttribute("fill"),
       };
     };
-    return { start: box("Start"), review: box("Review"), finish: box("Finish"), evidence: box("Evidence"), approval: box("Approval") };
+    return {
+      start: box("Start"),
+      review: box("Review"),
+      finish: box("Finish"),
+      problem: box("Problem"),
+      evidence: box("Evidence"),
+      controls: box("Controls"),
+      approval: box("Approval"),
+    };
   });
   const centerX = (box) => box.x + box.width / 2;
   const centerY = (box) => box.y + box.height / 2;
   assert.ok(timelineGeometry.start.x < timelineGeometry.review.x);
   assert.ok(timelineGeometry.review.x < timelineGeometry.finish.x);
   assert.equal(centerY(timelineGeometry.start), centerY(timelineGeometry.review));
+  assert.ok(timelineGeometry.problem.x < timelineGeometry.evidence.x);
+  assert.ok(timelineGeometry.controls.x < timelineGeometry.approval.x);
+  assert.equal(centerX(timelineGeometry.problem), centerX(timelineGeometry.start));
   assert.equal(centerX(timelineGeometry.evidence), centerX(timelineGeometry.review));
+  assert.equal(centerX(timelineGeometry.controls), centerX(timelineGeometry.review));
   assert.equal(centerX(timelineGeometry.approval), centerX(timelineGeometry.finish));
   assert.ok(timelineGeometry.evidence.y < timelineGeometry.start.y);
   assert.ok(timelineGeometry.approval.y < timelineGeometry.evidence.y);
   assert.notEqual(timelineGeometry.start.fill, timelineGeometry.evidence.fill);
   await page.screenshot({ path: join(artifacts.pathname, "timeline-desktop.png") });
+  const timelineDownloadPromise = page.waitForEvent("download");
+  await page.locator('[data-graph-action="export-png"]').click();
+  const timelineDownload = await timelineDownloadPromise;
+  await timelineDownload.saveAs(join(artifacts.pathname, "timeline-graph.png"));
   await page.locator("[data-graph-type]").selectOption("optimized");
   assert.doesNotMatch(await page.evaluate(() => window.boxlineEditor.getSource()), /^(?:rows|base) /m);
   assert.match(await page.evaluate(() => window.boxlineEditor.getSource()), /text:\n    Name the problem/);
@@ -330,6 +361,8 @@ state Approval [detail]:
     screenshots: [
       "artifacts/desktop.png",
       "artifacts/timeline-desktop.png",
+      "artifacts/timeline-graph.png",
+      "artifacts/product-timeline-graph.png",
       "artifacts/layout-window-desktop.png",
       "artifacts/mobile.png",
       "artifacts/layout-window-mobile.png",

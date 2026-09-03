@@ -161,7 +161,7 @@ state Approval [detail]:
   assert.doesNotThrow(() => layoutGraph(parseGraph("graph timeline\nrows timeline context\nbase Start\nstate Start [timeline]:\n  next -> Note\nstate Note [unknown]:")));
 });
 
-test("timeline layout follows the base row and aligns connected context above it", () => {
+test("timeline rows lay out their own graphs and align them across layers", () => {
   const graph = parseGraph(`graph timeline
 rows timeline context detail
 base Start
@@ -172,10 +172,16 @@ state Start [timeline]:
   next -> Review
 state Review [timeline]:
   next -> Finish
-state Why [context]:
+state Evidence [context]:
   explains -> Review
-state Gate [detail]:
-  blocks -> Finish`);
+state Problem [context]:
+  develops -> Evidence
+  frames -> Start
+state Approval [detail]:
+  gates -> Finish
+state Controls [detail]:
+  next -> Approval
+  informs -> Review`);
   const layout = layoutGraph(graph);
   const centerX = (id) => {
     const node = layout.nodes.get(id);
@@ -184,14 +190,20 @@ state Gate [detail]:
 
   assert.ok(layout.nodes.get("Start").x < layout.nodes.get("Review").x);
   assert.ok(layout.nodes.get("Review").x < layout.nodes.get("Finish").x);
-  assert.equal(centerX("Why"), centerX("Review"));
-  assert.equal(centerX("Gate"), centerX("Finish"));
-  assert.ok(layout.nodes.get("Gate").y < layout.nodes.get("Why").y);
-  assert.ok(layout.nodes.get("Why").y < layout.nodes.get("Start").y);
+  assert.ok(layout.nodes.get("Problem").x < layout.nodes.get("Evidence").x);
+  assert.ok(layout.nodes.get("Controls").x < layout.nodes.get("Approval").x);
+  assert.equal(centerX("Problem"), centerX("Start"));
+  assert.equal(centerX("Evidence"), centerX("Review"));
+  assert.equal(centerX("Controls"), centerX("Review"));
+  assert.equal(centerX("Approval"), centerX("Finish"));
+  assert.ok(layout.nodes.get("Controls").y < layout.nodes.get("Problem").y);
+  assert.ok(layout.nodes.get("Problem").y < layout.nodes.get("Start").y);
   assert.equal(layout.nodes.get("Start").isBase, true);
   assert.deepEqual(layout.rowHeaders.map((header) => header.className), ["timeline", "context", "detail"]);
   assert.equal(layout.columnBands.length, 0);
   assert.equal(new Set([...layout.nodes.values()].map((node) => node.fill)).size, 3);
+  assert.deepEqual(nodeIntersections(layout), []);
+  assert.equal(collinearOverlaps(layout).length, 0);
 
   const svg = renderSvg(graph, layout);
   assert.match(svg, /class="node timeline-node"/);
@@ -199,6 +211,30 @@ state Gate [detail]:
   assert.match(svg, /Establish the first event/);
   assert.match(svg, /class="row-header"/);
   assert.equal(Buffer.from(buildPdf(graph, layout)).subarray(0, 8).toString(), "%PDF-1.4");
+});
+
+test("timeline row graphs stack branches inside their own layer", () => {
+  const graph = parseGraph(`graph timeline
+rows timeline context
+base Start
+
+state Start [timeline]:
+  next -> Finish
+state Finish [timeline]:
+state Context [context]:
+  option a -> First branch
+  option b -> Second branch
+  explains -> Start
+state First branch [context]:
+state Second branch [context]:`);
+  const layout = layoutGraph(graph);
+  const first = layout.nodes.get("First branch");
+  const second = layout.nodes.get("Second branch");
+
+  assert.ok(layout.nodes.get("Context").x < first.x);
+  assert.equal(first.x, second.x);
+  assert.notEqual(first.y, second.y);
+  assert.ok(layout.rowHeaders[1].height > first.height);
 });
 
 test("classified graphs declare their column cycle and each state's class", () => {

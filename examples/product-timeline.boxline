@@ -24,11 +24,13 @@ state Release [timeline]:
 state Problem frame [context]:
   text:
     The project exists to shorten a handoff that currently loses decisions between teams.
+  develops -> Test cohort
   explains -> Discovery
 
 state Test cohort [context]:
   text:
     Five operators use the prototype on representative work before the implementation hardens.
+  develops -> Acceptance gate
   explains -> Prototype
 
 state Acceptance gate [context]:
@@ -36,7 +38,13 @@ state Acceptance gate [context]:
     The pilot must complete twenty runs without an unrecoverable handoff or silent data loss.
   governs -> Pilot
 
+state Threat model [detail]:
+  text:
+    Enumerate the failures that could expose data, stall the process, or hide a bad handoff.
+  develops -> Security review
+  informs -> Pilot
+
 state Security review [detail]:
   text:
-    Threat modeling, access review, and incident ownership must close before the release decision.
+    Access review and incident ownership must close before the release decision.
   blocks -> Release

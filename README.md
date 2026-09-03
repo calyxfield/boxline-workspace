@@ -15,7 +15,7 @@ state COAL [cargo]:
 
 `OPEN GRAPH` creates or focuses a separate live graph window for the same `.boxline` file, where the type dropdown rewrites that declaration. Directed mode preserves source order. Optimized mode repeatedly swaps neighboring boxes whenever doing so reduces crossings or vertical travel, then reports the passes and accepted swaps when it converges. Classified mode repeats its declared classes across successive columns, labels those columns, and applies the same row-order optimization inside them. Switching an existing graph to classified mode gives its states provisional `class-a` and `class-b` annotations that can be renamed in the source.
 
-Timeline mode treats the first declared row as the main process, follows arrows outward from a named base to order that row, and places every later row above it. A higher-row state aligns directly over the main-row state it connects to when space permits. Row categories color the boxes rather than the page, and `text:` adds a body independent of the state name:
+Timeline mode treats every declared row as its own directed graph. It follows arrows outward from a named base in the first row, lays each higher-row graph out from left to right, then uses cross-row arrows to align the layers. Compatible links line up exactly while conflicting links preserve the row's internal topology. Row categories color the boxes rather than the page, and `text:` adds a body independent of the state name:
 
 ```text
 graph timeline
